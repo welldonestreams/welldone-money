@@ -1,0 +1,40 @@
+{
+  "name": "welldone-money",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WellDone Money — personal finance desktop app",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "server": "node scripts/serve.mjs",
+    "test": "node --test",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.welldonestreams.welldonemoney",
+    "productName": "WellDone Money",
+    "files": [
+      "electron/**",
+      "index.html",
+      "src/**",
+      "assets/**",
+      "auth.css",
+      "styles.css",
+      "sw.js",
+      "manifest.webmanifest",
+      "scripts/**",
+      "_headers"
+    ],
+    "win": { "target": "nsis" },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true
+    }
+  }
+}

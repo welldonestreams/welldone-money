@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0c12">
+  <meta name="description" content="Private, owner-only financial dashboard and statement workspace">
+  <title>WellDone Money</title>
+  <script>
+    // Theme before first paint: explicit choice wins, else OS preference.
+    (function () {
+      try {
+        var t = localStorage.getItem('wmd_theme');
+        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+        document.documentElement.dataset.theme = t;
+      } catch (e) { document.documentElement.dataset.theme = 'dark'; }
+    })();
+  </script>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./assets/icon.svg">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <aside class="file-mode-warning" id="file-mode-warning" hidden>
+    <strong>WellDone Money needs its secure local server.</strong>
+    Close this tab and double-click <code>Open Finance Hub.cmd</code> in this folder.
+  </aside>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-lockup"><span class="brand-mark" aria-hidden="true">W</span><div><strong>WellDone</strong><span>Money</span></div></div>
+      <nav class="tabs" aria-label="WellDone Money sections">
+        <p class="nav-label">Money</p>
+        <button data-view="dashboard" class="active"><span aria-hidden="true">⌂</span>Overview</button>
+        <button data-view="accounts"><span aria-hidden="true">▣</span>Accounts</button>
+        <button data-view="transactions"><span aria-hidden="true">≡</span>Transactions</button>
+        <p class="nav-label">Plan</p>
+        <button data-view="renewals"><span aria-hidden="true">↻</span>Renewals</button>
+        <button data-view="investments"><span aria-hidden="true">↗</span>Investments</button>
+        <button data-view="benefits"><span aria-hidden="true">◇</span>Card perks</button>
+        <p class="nav-label">Workspace</p>
+        <button data-view="imports"><span aria-hidden="true">↓</span>Imports</button>
+        <button data-view="settings"><span aria-hidden="true">⚙</span>Settings</button>
+      </nav>
+      <div class="sidebar-status"><div class="status-line"><span class="status-dot" id="sidebar-status-dot"></span><strong id="sidebar-status">Local preview</strong></div><small id="sidebar-sync">Waiting for bridge connection</small></div>
+    </aside>
+    <main class="workspace">
+      <header class="workspace-header">
+        <div><p class="eyebrow" id="page-kicker">YOUR MONEY</p><h1 id="page-title">Good evening, Chance.</h1><p class="page-description" id="page-description">A calm, complete view of what you own, owe, earn, and spend.</p></div>
+        <div class="topbar-actions"><button class="ghost" id="privacy-toggle" aria-pressed="false">Hide amounts</button><button class="ghost" id="theme-toggle" title="Toggle theme" aria-label="Toggle theme">🌙</button><button class="ghost" id="logout-btn">Log out</button><button class="primary" id="quick-import">Import statements</button></div>
+      </header>
+      <aside class="preview-banner" id="preview-banner" hidden><div><strong>Dashboard preview</strong><span>These are fictional numbers showing the layout. Your private data will replace them after the bridge is connected.</span></div><button class="text-button" id="dismiss-preview">Show empty dashboard</button></aside>
+
+      <section id="view-dashboard" class="view active" aria-labelledby="overview-heading">
+        <div class="hero-grid">
+          <article class="net-worth-card"><div class="card-heading"><span>Net worth</span><span class="freshness-pill" id="overview-freshness">Preview</span></div><strong class="hero-amount money" id="net-worth">$0.00</strong><p id="net-worth-detail">Assets minus tracked debt</p><div class="hero-breakdown"><span><small>Assets</small><strong class="money" id="hero-assets">$0</strong></span><span><small>Debt</small><strong class="money" id="hero-debt">$0</strong></span></div></article>
+          <article class="panel flow-card"><div class="panel-heading"><div><span class="panel-label">THIS MONTH</span><h2 id="overview-heading">Cash flow</h2></div><button class="text-button" data-jump="transactions">Transactions</button></div><div class="flow-total"><strong class="money" id="month-net">$0</strong><span id="month-net-label">left after spending</span></div><div class="flow-meter"><span id="flow-meter-fill"></span></div><div class="flow-legend"><span><i class="inflow-dot"></i>In <strong class="money" id="month-inflow">$0</strong></span><span><i class="outflow-dot"></i>Out <strong class="money" id="month-outflow">$0</strong></span></div></article>
+        </div>
+        <div class="kpi-grid" id="kpi-grid"></div>
+        <div class="dashboard-grid dashboard-grid--wide">
+          <article class="panel"><div class="panel-heading"><div><span class="panel-label">SIX MONTHS</span><h2>Income and spending</h2></div><button class="text-button" data-jump="transactions">Explore transactions</button></div><div class="bar-chart" id="overview-chart" aria-label="Six month income and spending chart"></div></article>
+          <article class="panel"><div class="panel-heading"><div><span class="panel-label">UP NEXT</span><h2>Next renewals</h2></div><button class="text-button" data-jump="renewals">View all</button></div><div id="upcoming-summary"></div></article>
+        </div>
+        <div class="dashboard-grid"><article class="panel"><div class="panel-heading"><div><span class="panel-label">SPENDING</span><h2>Top categories</h2></div><button class="text-button" data-jump="transactions">Transactions</button></div><div id="category-summary"></div></article><article class="panel"><div class="panel-heading"><div><span class="panel-label">ACCOUNTS</span><h2>Balances</h2></div><button class="text-button" data-jump="accounts">All accounts</button></div><div id="account-summary" class="compact-account-list"></div></article></div>
+      </section>
+
+      <section id="view-accounts" class="view" aria-labelledby="accounts-title"><div class="section-heading"><div><p class="eyebrow">CURRENT SNAPSHOTS</p><h2 id="accounts-title">Accounts</h2></div><div class="account-heading-actions"><div class="plaid-coverage"><strong id="plaid-item-coverage">— of 10 Plaid connections</strong><span id="plaid-account-coverage">— accounts synced</span></div><button class="primary link-plaid" type="button">Link with Plaid</button><button class="ghost" id="add-account">Add manual account</button></div></div><div class="card-grid" id="accounts-grid"></div></section>
+      <section id="view-renewals" class="view" aria-labelledby="renewals-title">
+        <div id="renewals-app">
+          <div class="rn-topbar">
+            <div>
+              <p class="eyebrow">SUBSCRIPTIONS</p>
+              <h2 class="rn-title" id="renewals-title">Renewals</h2>
+              <p class="rn-sub">Bills, subscriptions, and renewals from your tracked services.</p>
+              <div class="rn-spend" id="rn-spend"></div>
+            </div>
+            <div class="rn-tools">
+              <button class="rn-primary" id="rn-add">+ Add subscription</button>
+              <button class="rn-ghost" id="rn-edit-all">Edit all</button>
+              <button class="rn-icon" id="rn-menu" title="Menu" aria-label="Menu">☰</button>
+            </div>
+          </div>
+          <div id="rn-content">
+            <div class="rn-summary" id="rn-summary"></div>
+            <div class="rn-list" id="rn-list"></div>
+            <div class="rn-timeline-wrap"><h3>Timeline</h3><div id="rn-timeline"></div></div>
+          </div>
+        </div>
+      </section>
+      <section id="view-transactions" class="view" aria-labelledby="transactions-title"><div class="section-heading"><div><p class="eyebrow">NORMALIZED LEDGER</p><h2 id="transactions-title">Transactions</h2></div><p class="muted" id="transaction-count"></p></div><div class="kpi-grid" id="transaction-flow-kpis"></div><div class="dashboard-grid transaction-insights"><article class="panel"><div class="panel-heading"><div><span class="panel-label">SIX MONTHS</span><h3>Income and spending</h3></div><span class="muted">Transfers excluded</span></div><div class="bar-chart" id="transaction-flow-chart"></div></article><article class="panel"><div class="panel-heading"><div><span class="panel-label">THIS MONTH</span><h3>Spending by category</h3></div></div><div id="transaction-flow-categories"></div></article></div><label class="transaction-search"><span>Search transactions</span><input id="transaction-search" type="search" placeholder="Merchant, account, or category"></label><article class="panel transaction-panel" id="transaction-list"></article></section>
+      <section id="view-investments" class="view" aria-labelledby="investments-title"><div class="section-heading"><div><p class="eyebrow">LONG-TERM VIEW</p><h2 id="investments-title">Investments</h2></div><p class="muted">Balances, contributions, and returns from connected accounts and private statements.</p></div><div class="kpi-grid" id="investment-kpis"></div><article class="panel investment-performance"><div class="panel-heading"><div><span class="panel-label">PERFORMANCE</span><h3>Investment history</h3></div><div class="range-tabs" id="investment-ranges" role="group" aria-label="Investment chart range"><button data-range="1W">1W</button><button data-range="1M">1M</button><button data-range="YTD" class="active">YTD</button><button data-range="3Y">3Y</button></div></div><div id="investment-chart" class="investment-chart"></div></article><article class="panel"><div class="panel-heading"><h3>Funds</h3><span class="muted" id="holding-count"></span></div><div id="holdings-list"></div></article></section>
+      <section id="view-benefits" class="view" aria-labelledby="benefits-title"><div class="section-heading"><div><p class="eyebrow">USE IT OR LOSE IT</p><h2 id="benefits-title">Card perks</h2><p class="muted">Track fixed-dollar credits by their real monthly, quarterly, or annual reset.</p></div><button class="primary" id="add-benefit">Add perk</button></div><div id="benefit-catalog-note" class="inline-notice" role="note"></div><details class="panel card-connection-panel"><summary><span><strong id="card-connection-summary">Card connections</strong><small>Match each household card to its Plaid or statement account</small></span><span aria-hidden="true">⌄</span></summary><div id="card-profile-links" class="card-profile-links"></div></details><div class="kpi-grid" id="benefit-kpis"></div><div class="filters"><label>Show <select id="benefit-filter"><option value="open">Unused</option><option value="all">All</option><option value="used">Used</option></select></label></div><div id="benefits-grid" class="benefit-grid"></div></section>
+      <section id="view-imports" class="view" aria-labelledby="imports-title"><div class="section-heading"><div><p class="eyebrow">PRIVATE BACKFILL</p><h2 id="imports-title">Statement inbox</h2><p class="muted">WellDone Money compares each statement with your connected Plaid history and remembers confirmed accounts.</p></div></div><label class="dropzone" id="dropzone"><input id="file-input" type="file" accept=".qfx,.ofx,.qbo,.csv,text/csv" multiple><span class="drop-icon">↓</span><strong>Drop statement files here</strong><span>Raw files stay on this device. Normalized rows and an import audit are saved privately.</span></label><div id="import-batch-actions" class="import-batch-actions"></div><div id="import-review"></div><article class="panel"><div class="panel-heading"><h3>Import history</h3><button class="text-button" id="export-actual">Export Actual CSVs</button></div><div id="import-history"></div></article></section>
+      <section id="view-settings" class="view" aria-labelledby="settings-title"><div class="section-heading"><div><p class="eyebrow">PRIVACY AND CONNECTIONS</p><h2 id="settings-title">Settings</h2></div></div><div class="settings-grid"><article class="panel connection-card"><span class="panel-label">DATA SOURCE</span><h3>Plaid connection</h3><p>Plaid credentials and bridge tokens stay on the server. This browser receives only sanitized finance data and a short-lived Plaid Hosted Link URL after you click.</p><div class="connection-row"><span>Trial connection slots</span><strong id="settings-plaid-items">— of 10 tracked</strong></div><div class="connection-row"><span>Financial accounts synced</span><strong id="settings-plaid-accounts">—</strong></div><div class="button-row"><button class="primary link-plaid" type="button">Link another institution</button></div><p class="muted connection-footnote">One Plaid Item is one institution connection and can contain several accounts. Plaid Dashboard remains authoritative if an Item was previously removed.</p></article><article class="panel"><h3>Profile backup</h3><p>Export local accounts, perks, and normalized transactions. This browser backup is <strong>not encrypted</strong>.</p><div class="button-row"><button id="export-profile" class="primary">Export local backup</button><label class="button ghost">Import backup<input id="profile-input" type="file" accept="application/json,.json"></label></div></article><article class="panel danger"><h3>Clear this device</h3><p>Deletes local browser data only. It does not modify Plaid, the bridge, or Actual Budget.</p><button id="clear-data" class="danger-button">Clear local data</button></article></div></section>
+    </main>
+  </div>
+  <dialog id="editor-dialog"><form method="dialog" id="editor-form"><div class="dialog-heading"><h2 id="dialog-title">Edit</h2><button type="button" class="dialog-cancel" aria-label="Close">×</button></div><div id="editor-fields"></div><div class="dialog-actions"><button type="button" class="dialog-cancel ghost">Cancel</button><button value="save" class="primary" id="dialog-save">Save</button></div></form></dialog>
+
+  <div id="rn-overlay" class="rn-overlay" hidden><div class="rn-modal" role="dialog" aria-modal="true" aria-labelledby="rn-modal-title"><h2 id="rn-modal-title">Add subscription</h2><input type="hidden" id="rn-edit-id"><label class="rn-field"><span>Name</span><input id="rn-fName" required placeholder="Netflix"></label><label class="rn-field"><span>Next renewal date</span><input id="rn-fDate" type="date"></label><label class="rn-field"><span>URL</span><input id="rn-fUrl" placeholder="https://"></label><label class="rn-field"><span>Note</span><input id="rn-fNote"></label><label class="rn-field"><span>Price</span><input id="rn-fPrice" type="number" step="0.01" min="0" placeholder="0.00"></label><label class="rn-field"><span>Cycle</span><select id="rn-fCycle"><option value="yearly">Yearly</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="custom">Every N months</option><option value="once">One-time / lifetime</option></select></label><label class="rn-field" id="rn-fMonthsWrap" hidden><span>Months</span><input id="rn-fMonths" type="number" min="1" max="120" value="6"></label><label class="rn-field" id="rn-fPurchasedWrap" hidden><span>Purchased</span><input id="rn-fPurchased" type="date"></label><div id="rn-history"></div><div class="rn-modal-actions"><button type="button" class="rn-ghost" id="rn-del">Delete</button><button type="button" class="rn-ghost" id="rn-cancel">Cancel</button><button type="button" class="rn-primary" id="rn-save">Save</button></div></div></div>
+
+  <div id="rn-ea-overlay" class="rn-overlay" hidden><div class="rn-modal rn-modal--wide" role="dialog" aria-modal="true" aria-labelledby="rn-ea-title"><h2 id="rn-ea-title">Edit all</h2><div id="rn-eaRows"></div><div class="rn-modal-actions"><button type="button" class="rn-ghost" id="rn-ea-add">+ Add row</button><button type="button" class="rn-ghost" id="rn-ea-cancel">Cancel</button><button type="button" class="rn-primary" id="rn-ea-save">Save all</button></div></div></div>
+
+  <div id="rn-drawer" class="rn-drawer" hidden><div class="rn-drawer-head"><strong>Renewals menu</strong><button type="button" class="rn-icon" id="rn-close-drawer" aria-label="Close">×</button></div><div class="rn-drawer-item" id="rn-seed">⬇ Load my services</div><div class="rn-drawer-item" id="rn-export">⤓ Export backup</div><div class="rn-drawer-item" id="rn-import">⤒ Import backup</div></div>
+  <div id="rn-scrim" class="rn-scrim" hidden></div>
+  <div id="rn-undo" class="rn-undo" hidden></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="./src/file-mode.js"></script>
+  <script type="module" src="./src/app.js"></script>
+  <script type="module" src="./src/renewals.js"></script>
+</body>
+</html>

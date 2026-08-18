@@ -1,0 +1,3 @@
+Transaction Date,Posted Date,Description,Amount,Card Last 4,Name on Card,Raw Merchant Name
+2026-07-26,2026-07-27,Book Store,18.94,1234,Demo User,BOOK STORE 123
+2026-07-29,2026-07-29,Payment,-100.00,,,
