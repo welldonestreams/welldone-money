@@ -4,3 +4,7 @@ dist/
 .DS_Store
 .env
 build/
+# Internal review/handoff files — never commit to the public repo.
+REVIEW-FINDINGS.md
+*-FINDINGS.md
+*-HANDOFF*.md
