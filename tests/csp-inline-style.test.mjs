@@ -23,7 +23,7 @@ const renewals = read('src/renewals.js');
 const html = read('index.html');
 
 test('every served CSP keeps style-src strict', () => {
-  for (const name of ['nginx.conf', '_headers', 'scripts/adapter.mjs', 'scripts/serve.mjs']) {
+  for (const name of ['nginx.conf', '_headers', 'scripts/adapter.mjs', 'electron/app-protocol.cjs']) {
     const source = read(name);
     assert.match(source, /style-src 'self'/, `${name} should declare style-src 'self'`);
     assert.doesNotMatch(source, /style-src[^;"\n]*'unsafe-inline'/, `${name} must not relax style-src to fix a layout bug`);

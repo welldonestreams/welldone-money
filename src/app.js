@@ -654,7 +654,9 @@ const dropzone = $('#dropzone');
 ['dragenter', 'dragover'].forEach(name => dropzone.addEventListener(name, event => { event.preventDefault(); dropzone.classList.add('drag'); }));
 ['dragleave', 'drop'].forEach(name => dropzone.addEventListener(name, event => { event.preventDefault(); dropzone.classList.remove('drag'); }));
 dropzone.addEventListener('drop', event => receiveFiles(event.dataTransfer.files));
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+// Web-only. Inside the desktop shell the bundle is already local, and a
+// service worker would keep serving the previous build after an update.
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('/sw.js').catch(() => {});
 render();
 
 // Live bridge refresh: merge real data from the same-origin adapter into the

@@ -57,11 +57,16 @@ arrives through Plaid via the hosted backend; see `BRIDGE-CONTRACT.md`.
 
 - The frontend is static, local-first, and dependency-free at runtime. Electron
   is the shell only.
-- `scripts/serve.mjs` is the desktop serving path and must carry the same
-  security headers as `nginx.conf`. `tests/serve-headers.test.mjs` asserts the
-  served headers, not the source text.
-- The Electron shell must verify the local server's `/__health` nonce before
-  loading it. Never trust a bare TCP connect on a fixed port.
+- `electron/app-protocol.cjs` is the desktop serving path. It must carry the
+  same security headers as `nginx.conf`, and the CSP stays a real response
+  header — a `<meta>` policy silently drops `frame-ancestors`, `base-uri`, and
+  `form-action`. `tests/app-protocol.test.mjs` asserts the served headers, not
+  the source text.
+- The shell must never spawn a server or bind a port. The bundle is served from
+  the registered `app://` scheme; `protocol.registerSchemesAsPrivileged` has to
+  run at module scope, before `app.whenReady()`.
+- The CSP has no `'unsafe-inline'` for scripts, so `index.html` must not carry
+  an inline `<script>` — it will be blocked silently. Put it in a file.
 - `src/parser.js` is the authoritative transaction parser. Add fixtures and
   tests for every supported format or institution variant.
 - Preserve stable transaction IDs. Prefer OFX/QFX `FITID`; otherwise use the

@@ -1,11 +1,12 @@
 @echo off
-title WellDone Money installer
+title WellDone Money - build installer
 echo.
 echo   ========================================
-echo     WellDone Money  -  installer
+echo     WellDone Money  -  build the installer
 echo   ========================================
 echo.
-echo   This builds and installs the desktop app.
+echo   This BUILDS the installer from source. It needs Node.js.
+echo   To just install the app, download Setup.exe from Releases.
 echo.
 where node >nul 2>nul
 if errorlevel 1 goto NONODE
@@ -19,7 +20,7 @@ call npm run dist
 if errorlevel 1 goto FAIL
 
 echo.
-echo   Done. Run the installer in dist\ to install WellDone Money.
+echo   Done. Run dist\WellDone-Money-Setup-*.exe to install the app.
 pause
 exit /b 0
 
