@@ -9,7 +9,7 @@
     "start": "electron .",
     "icons": "node scripts/make-icons.mjs",
     "test": "node --test",
-    "dist": "npm run icons && electron-builder --win"
+    "dist": "npm run icons && electron-builder --win --publish never"
   },
   "devDependencies": {
     "electron": "^33.0.0",
