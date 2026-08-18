@@ -21,6 +21,12 @@ const ORIGIN = `${SCHEME}://${HOST}`;
 
 // Mirrors nginx.conf. The two serving paths must not drift: a policy relaxed
 // to chase a layout bug in one place has to fail the suite in both.
+//
+// connect-src is 'self', which is every origin this app currently talks to.
+// When the hosted backend lands, its calls (auth, Plaid link and exchange,
+// /api/finance/*) are cross-origin and this policy will block them with no
+// console error worth reading. Add that one origin explicitly here and in
+// nginx.conf — never a wildcard, and never by widening default-src.
 const CSP = "default-src 'self'; script-src 'self'; style-src 'self'; "
   + "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
   + "base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
