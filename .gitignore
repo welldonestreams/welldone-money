@@ -4,3 +4,8 @@ dist/
 .DS_Store
 .env
 build/
+
+# Internal notes — never publish these to a public repo
+REVIEW-FINDINGS.md
+*-FINDINGS.md
+*-HANDOFF*.md
