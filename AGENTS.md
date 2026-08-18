@@ -67,6 +67,9 @@ arrives through Plaid via the hosted backend; see `BRIDGE-CONTRACT.md`.
   run at module scope, before `app.whenReady()`.
 - The CSP has no `'unsafe-inline'` for scripts, so `index.html` must not carry
   an inline `<script>` — it will be blocked silently. Put it in a file.
+- `connect-src` is `'self'`. The hosted backend is a different origin, so its
+  URL must be added explicitly to the CSP in both `electron/app-protocol.cjs`
+  and `nginx.conf` when Phase 1 lands. Never widen it with a wildcard.
 - `src/parser.js` is the authoritative transaction parser. Add fixtures and
   tests for every supported format or institution variant.
 - Preserve stable transaction IDs. Prefer OFX/QFX `FITID`; otherwise use the
