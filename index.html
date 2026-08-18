@@ -6,24 +6,16 @@
   <meta name="theme-color" content="#0a0c12">
   <meta name="description" content="Private, owner-only financial dashboard and statement workspace">
   <title>WellDone Money</title>
-  <script>
-    // Theme before first paint: explicit choice wins, else OS preference.
-    (function () {
-      try {
-        var t = localStorage.getItem('wmd_theme');
-        if (t !== 'light' && t !== 'dark') t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-        document.documentElement.dataset.theme = t;
-      } catch (e) { document.documentElement.dataset.theme = 'dark'; }
-    })();
-  </script>
+  <script src="./src/theme-boot.js"></script>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" href="./assets/icon.svg">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
   <aside class="file-mode-warning" id="file-mode-warning" hidden>
-    <strong>WellDone Money needs its secure local server.</strong>
-    Close this tab and double-click <code>Open Finance Hub.cmd</code> in this folder.
+    <strong>WellDone Money cannot run from a file:// page.</strong>
+    Browsers block module scripts there. Open the installed desktop app, or
+    serve this folder over http:// if you are running it from source.
   </aside>
   <div class="app-shell">
     <aside class="sidebar">
