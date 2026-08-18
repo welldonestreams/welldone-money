@@ -75,6 +75,14 @@ function createHandler(root) {
     // Containment: a resolved path must sit under the bundle root. Compared
     // with a trailing separator so a sibling directory sharing the prefix
     // (…/bundle-old) cannot pass a plain startsWith.
+    //
+    // NOTE (latent, not a live bug): this compares the lexical path only, so a
+    // symlink inside the bundle pointing outside it would be followed by the
+    // existsSync/statSync/createReadStream below. An asar archive holds no
+    // symlinks and the repo has none, so it is not currently reachable. If it
+    // ever becomes one, resolve with realpathSync(candidate) and re-check the
+    // containment on the resolved path — after verifying realpathSync behaves
+    // correctly on asar paths, since a wrong result would blank the app.
     if (candidate !== base && !candidate.startsWith(base + sep)) return notFound();
     if (!existsSync(candidate) || statSync(candidate).isDirectory()) return notFound();
     return new Response(Readable.toWeb(createReadStream(candidate)), {
