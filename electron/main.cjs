@@ -12,6 +12,11 @@ const { SCHEME, ORIGIN, createHandler } = require('./app-protocol.cjs');
 const BUNDLE_ROOT = path.join(__dirname, '..');
 const DEFAULT_BOUNDS = { width: 1200, height: 800 };
 const MIN_SIZE = { width: 900, height: 640 };
+// A corrupted or hand-edited window-state.json could hold a huge finite number
+// (e.g. 1e9); Math.max floors it but nothing capped it, so the window would
+// open larger than any display with no in-app way to recover. 8K is a generous
+// ceiling that no real monitor exceeds.
+const MAX_SIZE = { width: 7680, height: 4320 };
 
 // Must run before the app is ready. Without `standard` the scheme cannot
 // resolve relative URLs, and without `secure` the page is treated as an
@@ -34,8 +39,8 @@ function loadBounds() {
     const height = Number(saved.height);
     if (!Number.isFinite(width) || !Number.isFinite(height)) return { ...DEFAULT_BOUNDS };
     const bounds = {
-      width: Math.max(MIN_SIZE.width, Math.round(width)),
-      height: Math.max(MIN_SIZE.height, Math.round(height)),
+      width: Math.min(MAX_SIZE.width, Math.max(MIN_SIZE.width, Math.round(width))),
+      height: Math.min(MAX_SIZE.height, Math.max(MIN_SIZE.height, Math.round(height))),
       maximized: saved.maximized === true,
     };
     // A saved position is only restored if it still lands on a connected
@@ -144,7 +149,13 @@ function createWindow() {
   mainWindow.on('close', () => saveBounds(mainWindow));
   mainWindow.on('closed', () => { mainWindow = null; });
 
-  mainWindow.webContents.on('did-fail-load', (_event, code, description, url) => {
+  mainWindow.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+    // A subframe failing is not the app failing, and ERR_ABORTED (-3) is the
+    // cancelled navigation raised by will-navigate/openExternal above — not a
+    // real load failure. Showing the error box on either fires a spurious
+    // "failed to start" dialog over a perfectly healthy window.
+    if (!isMainFrame) return;
+    if (code === -3) return;
     dialog.showErrorBox('WellDone Money failed to start',
       `The app could not load its interface.\n\n${description} (${code})\n${url}`);
   });
@@ -155,6 +166,10 @@ function createWindow() {
 app.on('second-instance', () => {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();
+  // A second launch during the startup window (or against a window hidden by a
+  // future tray/minimise-to-background behaviour) would otherwise focus a
+  // window that is not visible.
+  if (!mainWindow.isVisible()) mainWindow.show();
   mainWindow.focus();
 });
 
