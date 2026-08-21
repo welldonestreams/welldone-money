@@ -20,9 +20,12 @@ it. Windows SmartScreen warns on installers that are not code-signed; choose
   double-click wrapper for the same thing and needs Node installed.
 
 ## Structure
-- `electron/main.cjs` — spawns the local server, opens the window
+- `electron/main.cjs` — the Electron entry point: registers the `app://` scheme, opens the window, and wires the local `/api/*` stores
 - `electron/app-protocol.cjs` — serves the bundle over `app://`, with the
   security headers, and is unit-tested without Electron
+- `electron/local-api.cjs` — answers the durable `/api/*` stores (card
+  profiles, imports, renewals) from JSON files under the app's userData
+  directory; bridge and Plaid routes are unavailable in the desktop build
 - `scripts/make-icons.mjs` — renders `assets/icon.svg` to `build/icon.ico`
   and `assets/icon.png` with no image dependencies (`npm run icons`)
 - `index.html`, `src/`, `assets/`, `auth.css`, `sw.js` — the app

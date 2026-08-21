@@ -1,6 +1,6 @@
 {
   "name": "welldone-money",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "WellDone Money \u2014 personal finance desktop app",
@@ -20,6 +20,7 @@
     "productName": "WellDone Money",
     "files": [
       "electron/**",
+      "scripts/renewals-store.mjs",
       "index.html",
       "src/**",
       "assets/**",
@@ -35,7 +36,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": true,
+      "deleteAppDataOnUninstall": false,
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",

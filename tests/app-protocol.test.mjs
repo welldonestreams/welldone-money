@@ -46,6 +46,23 @@ test('an adapter call with no local answer 404s instead of throwing', async () =
   assert.equal(res.status, 404);
 });
 
+test('an injected apiHandler answers /api/* routes', async () => {
+  // The desktop shell injects the local API (electron/local-api.cjs); the
+  // bundle handler itself must route /api/* to it untouched.
+  const seen = [];
+  const handle = createHandler(root, {
+    apiHandler: async (request, pathname) => {
+      seen.push(pathname);
+      return new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+  const res = await handle({ url: `${ORIGIN}/api/card-profiles`, method: 'GET' });
+  assert.equal(res.status, 200);
+  assert.deepEqual(seen, ['/api/card-profiles']);
+  // non-/api paths still serve the bundle
+  assert.equal((await handle({ url: `${ORIGIN}/index.html` })).status, 200);
+});
+
 test('a directory is not served', async () => {
   assert.equal((await get('/src')).status, 404);
 });

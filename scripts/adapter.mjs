@@ -324,6 +324,15 @@ function loadImportStore() {
       transactions: Array.isArray(parsed.transactions) ? parsed.transactions.slice(-100000) : [],
     };
   } catch {
+    // A damaged file must never be silently overwritten by the next save:
+    // move it aside first so the best recovery copy survives.
+    if (existsSync(IMPORTS_FILE)) {
+      try {
+        const backup = `${IMPORTS_FILE}.corrupt-${Date.now()}`;
+        renameSync(IMPORTS_FILE, backup);
+        console.warn(`imports store unreadable; preserved as ${backup}`);
+      } catch { /* leave the damaged original in place if it cannot be moved */ }
+    }
     return emptyImportStore();
   }
 }

@@ -120,6 +120,11 @@ function isServerOwned(id) {
   return SERVER_OWNED_PREFIXES.some(prefix => String(id || '').startsWith(prefix));
 }
 
+// A missing balance and a zero balance are different facts: null renders as an
+// em dash, never a fabricated $0.00.
+function balanceText(account) {
+  return account && account.currentBalance != null ? money.format(numeric(account.currentBalance)) : '—';
+}
 function accountCard(account, editable) {
   const owed = account.kind === 'credit';
   const accentClass = owed ? 'account-card--credit' : account.kind === 'investment' ? 'account-card--investment' : 'account-card--cash';
@@ -131,11 +136,11 @@ function accountCard(account, editable) {
   const snapshotAction = editable && !account.balanceAsOf && !isPlaid ? `<button class="text-button edit-account snapshot-action" data-id="${escapeHtml(account.id)}">Add optional balance</button>` : '';
   const canImport = editable && ['credit', 'checking', 'savings'].includes(account.kind);
   const importer = canImport ? `<label class="account-statement-drop" title="Import directly into ${escapeHtml(account.name)}"><input class="account-file-input" type="file" accept=".qfx,.ofx,.qbo,.csv,text/csv" multiple data-account-id="${escapeHtml(account.id)}"><span>Drop CSV, QFX, or OFX here</span><small>Imports directly to this account and skips duplicates</small></label>` : '';
-  return `<article class="account-card ${accentClass}" data-account-drop="${escapeHtml(account.id)}"><header><div><span class="institution">${escapeHtml(account.institution || account.kind)}</span><h3>${escapeHtml(account.name)}</h3></div>${editable && !isPlaid ? `<div class="account-actions"><button class="text-button edit-account" data-id="${escapeHtml(account.id)}">Edit</button>${isServerOwned(account.id) ? '' : `<button class="text-button text-button--danger remove-account" data-id="${escapeHtml(account.id)}">Remove</button>`}</div>` : isPlaid ? '<span class="plaid-badge">Plaid</span>' : '<span class="sample-tag">Sample</span>'}</header><div class="balance money ${numeric(account.currentBalance) < 0 ? 'negative' : ''}">${money.format(numeric(account.currentBalance))}</div><footer><span class="muted">${snapshot}</span><span>${escapeHtml(account.kind)}</span></footer>${snapshotAction}${owed ? `<dl><dt>Statement</dt><dd class="money">${money.format(numeric(account.statementBalance))}</dd><dt>Minimum</dt><dd class="money">${money.format(numeric(account.minimumDue))}</dd><dt>Due</dt><dd>${account.dueDate ? formatDate(account.dueDate) : '—'}</dd></dl>` : ''}${importer}</article>`;
+  return `<article class="account-card ${accentClass}" data-account-drop="${escapeHtml(account.id)}"><header><div><span class="institution">${escapeHtml(account.institution || account.kind)}</span><h3>${escapeHtml(account.name)}</h3></div>${editable && !isPlaid ? `<div class="account-actions"><button class="text-button edit-account" data-id="${escapeHtml(account.id)}">Edit</button>${isServerOwned(account.id) ? '' : `<button class="text-button text-button--danger remove-account" data-id="${escapeHtml(account.id)}">Remove</button>`}</div>` : isPlaid ? '<span class="plaid-badge">Plaid</span>' : '<span class="sample-tag">Sample</span>'}</header><div class="balance money ${numeric(account.currentBalance) < 0 ? 'negative' : ''}">${balanceText(account)}</div><footer><span class="muted">${snapshot}</span><span>${escapeHtml(account.kind)}</span></footer>${snapshotAction}${owed ? `<dl><dt>Statement</dt><dd class="money">${money.format(numeric(account.statementBalance))}</dd><dt>Minimum</dt><dd class="money">${money.format(numeric(account.minimumDue))}</dd><dt>Due</dt><dd>${account.dueDate ? formatDate(account.dueDate) : '—'}</dd></dl>` : ''}${importer}</article>`;
 }
 
 function accountCompactRow(account) {
-  return `<div class="compact-account"><span class="account-icon account-icon--${escapeHtml(account.kind)}">${escapeHtml(account.name.slice(0, 1))}</span><div><strong>${escapeHtml(account.name)}</strong><small>${escapeHtml(account.institution || account.kind)}</small></div><strong class="money">${money.format(numeric(account.currentBalance))}</strong></div>`;
+  return `<div class="compact-account"><span class="account-icon account-icon--${escapeHtml(account.kind)}">${escapeHtml(account.name.slice(0, 1))}</span><div><strong>${escapeHtml(account.name)}</strong><small>${escapeHtml(account.institution || account.kind)}</small></div><strong class="money">${balanceText(account)}</strong></div>`;
 }
 
 function renderTransactions(data) {
@@ -648,7 +653,9 @@ document.addEventListener('dragleave', event => { const tile = event.target.clos
 document.addEventListener('drop', event => { const tile = event.target.closest?.('[data-account-drop]'); if (!tile) return; event.preventDefault(); tile.classList.remove('account-card--drag'); if (event.dataTransfer?.files?.length) receiveFiles(event.dataTransfer.files, tile.dataset.accountDrop, true); });
 $('#export-actual').addEventListener('click', exportActual);
 $('#export-profile').addEventListener('click', () => { if (!confirm('This backup is unencrypted and contains normalized transactions. Store it securely. Continue?')) return; downloadJson(`well-done-money-backup-UNENCRYPTED-${today()}.json`, state); });
-$('#profile-input').addEventListener('change', async event => { try { const parsed = JSON.parse(await event.target.files[0].text()); if (!parsed || !Array.isArray(parsed.accounts)) throw new Error('Invalid WellDone Money backup'); state = migrateState(parsed); persist(); toast('Profile restored.'); } catch (error) { toast(error.message); } });
+$('#profile-input').addEventListener('change', async event => { try { const parsed = JSON.parse(await event.target.files[0].text()); if (!parsed || !Array.isArray(parsed.accounts)) throw new Error('Invalid WellDone Money backup'); // Never replace the live state without keeping a recovery copy: the prior
+  // state is preserved in this browser before the backup is applied.
+  localStorage.setItem('wmd_preImportBackup', JSON.stringify(state)); state = migrateState(parsed); persist(); toast('Profile restored. Previous state backed up in this browser.'); } catch (error) { toast(error.message); } });
 $('#clear-data').addEventListener('click', () => { if (!confirm('Delete WellDone Money data from this browser?')) return; clearState(); state = loadState(); render(); toast('Local data cleared.'); });
 const dropzone = $('#dropzone');
 ['dragenter', 'dragover'].forEach(name => dropzone.addEventListener(name, event => { event.preventDefault(); dropzone.classList.add('drag'); }));
@@ -667,16 +674,24 @@ async function refreshBridge() {
     const [d, cardProfiles, importData, privateFinance, renewals] = await Promise.all([loadBridgeData(), loadCardProfiles(), loadImportData(), loadPrivateFinanceData(), loadRenewals()]);
     const m = mapBridgeData(d);
     if (!m.accounts.length) return;
+    // A section whose fetch failed (null) must not replace the current rows
+    // with an empty list: a partial bridge outage keeps the previous data.
+    const sectionOk = (key) => d && d[key] != null;
+    const txOk = sectionOk('transactions');
+    const recOk = sectionOk('recurring');
+    const holdOk = sectionOk('holdings');
+    const liabOk = sectionOk('liabilities');
     const keepLocal = (list, prefix) => (list || []).filter(item => !String(item.id || '').startsWith(prefix));
     const localAccounts = (state.accounts || []).filter(item => !isServerOwned(item.id));
     const privateAccounts = Array.isArray(privateFinance.investments?.accounts) ? privateFinance.investments.accounts : [];
     state.accounts = [...localAccounts, ...m.accounts, ...(Array.isArray(importData.accounts) ? importData.accounts : []), ...privateAccounts];
     const manualTransactions = (state.transactions || []).filter(item => !String(item.id || '').startsWith('bridge-tx-') && !String(item.id || '').startsWith('import:'));
-    state.transactions = applyPrivateIncomeRules([...manualTransactions, ...m.transactions, ...(Array.isArray(importData.transactions) ? importData.transactions : [])], privateFinance.incomeRules);
-    state.recurring = [...keepLocal(state.recurring, 'bridge-rec-'), ...m.recurring];
+    const priorBridgeTx = txOk ? [] : (state.transactions || []).filter(item => String(item.id || '').startsWith('bridge-tx-'));
+    state.transactions = applyPrivateIncomeRules([...manualTransactions, ...priorBridgeTx, ...m.transactions, ...(Array.isArray(importData.transactions) ? importData.transactions : [])], privateFinance.incomeRules);
+    state.recurring = recOk ? [...keepLocal(state.recurring, 'bridge-rec-'), ...m.recurring] : (state.recurring || []);
     const privateHoldings = Array.isArray(privateFinance.investments?.holdings) ? privateFinance.investments.holdings : [];
-    state.holdings = [...keepLocal(state.holdings, 'bridge-hold-').filter(item => !String(item.id || '').startsWith('private-investment-')), ...m.holdings, ...privateHoldings];
-    state.liabilities = [...keepLocal(state.liabilities, 'bridge-liab-'), ...m.liabilities];
+    state.holdings = holdOk ? [...keepLocal(state.holdings, 'bridge-hold-').filter(item => !String(item.id || '').startsWith('private-investment-')), ...m.holdings, ...privateHoldings] : (state.holdings || []);
+    state.liabilities = liabOk ? [...keepLocal(state.liabilities, 'bridge-liab-'), ...m.liabilities] : (state.liabilities || []);
     // Profiles created before stable bridge IDs used array positions. Preserve
     // those private selections in memory while the durable profile store is
     // migrated separately, without writing financial metadata from the client.

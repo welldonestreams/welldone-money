@@ -60,15 +60,23 @@ function notFound() {
 }
 
 // Requests the frontend makes to the hosted finance adapter (/api/...) have no
-// answer inside the bundle. They resolve here and must 404 cleanly rather than
-// throw, so the caller's own "bridge unreachable" path runs.
-function createHandler(root) {
+// answer inside the bundle by default. They resolve here and must 404 cleanly
+// rather than throw, so the caller's own "bridge unreachable" path runs.
+// The desktop shell injects a local API handler (electron/local-api.cjs) that
+// answers the durable local stores (card profiles, imports, renewals); bridge
+// and Plaid routes stay unavailable there, but now with a clean JSON 404/503.
+function createHandler(root, options = {}) {
+  const { apiHandler } = options;
   const base = resolve(root);
   return function handle(request) {
     let pathname;
     try {
       pathname = decodeURIComponent(new URL(request.url).pathname);
     } catch {
+      return notFound();
+    }
+    if (pathname.startsWith('/api/')) {
+      if (apiHandler) return apiHandler(request, pathname);
       return notFound();
     }
     const candidate = normalize(join(base, pathname === '/' ? 'index.html' : pathname));
