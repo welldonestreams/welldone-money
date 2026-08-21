@@ -8,6 +8,7 @@ const { app, BrowserWindow, Menu, dialog, protocol, screen, shell } = require('e
 const { readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { SCHEME, ORIGIN, createHandler } = require('./app-protocol.cjs');
+const { createLocalApi } = require('./local-api.cjs');
 
 const BUNDLE_ROOT = path.join(__dirname, '..');
 const DEFAULT_BOUNDS = { width: 1200, height: 800 };
@@ -133,16 +134,23 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
   // A link to somewhere else belongs in the user's browser, not in a window
-  // with no address bar.
+  // with no address bar. Only http(s) destinations are ever handed to the OS;
+  // a crafted javascript:/file:/custom-scheme URL must not reach openExternal.
+  const safeExternal = (url) => {
+    try {
+      const protocol = new URL(url).protocol;
+      if (protocol === 'http:' || protocol === 'https:') shell.openExternal(url);
+    } catch { /* unparseable URLs are ignored */ }
+  };
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    safeExternal(url);
     return { action: 'deny' };
   });
   // Same rule for in-place navigation: nothing may replace the bundle.
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith(`${ORIGIN}/`)) {
       event.preventDefault();
-      shell.openExternal(url);
+      safeExternal(url);
     }
   });
 
@@ -184,7 +192,10 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.whenReady().then(() => {
-    protocol.handle(SCHEME, createHandler(BUNDLE_ROOT));
+    // The desktop's /api/* answers come from local JSON stores under userData
+    // (card profiles, imports, renewals); bridge and Plaid routes stay 404/503.
+    const localApi = createLocalApi(app.getPath('userData'));
+    protocol.handle(SCHEME, createHandler(BUNDLE_ROOT, { apiHandler: localApi }));
     buildMenu();
     createWindow();
     // macOS keeps the process alive with no windows; reopening from the dock

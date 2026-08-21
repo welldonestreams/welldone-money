@@ -51,3 +51,20 @@ test('the shell keeps its security posture', () => {
     'registerSchemesAsPrivileged must run before app.whenReady()');
   assert.doesNotMatch(main, /child_process|spawn\(/, 'the shell must not spawn a server');
 });
+
+test('the desktop local API and its shared store ship in the installer', () => {
+  // electron/local-api.cjs is covered by the electron/** pattern; the renewals
+  // store is the one shared module outside electron/ it needs at runtime.
+  assert.ok(packaged('electron/local-api.cjs'), 'local-api.cjs must be packaged');
+  assert.ok(packaged('scripts/renewals-store.mjs'), 'renewals-store.mjs must be packaged');
+  assert.match(read('electron/main.cjs'), /createLocalApi/, 'main.cjs must wire the local API');
+  assert.match(read('electron/local-api.cjs'), /renewals-store\.mjs/, 'local API must import the shared store');
+});
+
+test('uninstalling must not delete the app data directory', () => {
+  // deleteAppDataOnUninstall would erase browser storage (accounts, manual
+  // transactions, renewals, imports) on uninstall — the review's data-loss
+  // finding. The flag must stay off.
+  const pkg = JSON.parse(read('package.json'));
+  assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false);
+});

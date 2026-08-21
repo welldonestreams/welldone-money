@@ -37,14 +37,20 @@ export async function loadBridgeData() {
     }
   }));
   const accountNames = [...new Set(listOf(out.accounts, 'accounts').map(account => String(account.account || '')).filter(Boolean))];
-  const transactionPages = await Promise.all((accountNames.length ? accountNames : ['']).map(async account => {
-    try {
+  // A failed transactions fetch must NOT become an empty list: refreshBridge
+  // uses a null here to keep the previous bridge transactions instead of
+  // replacing real history with an empty result on a partial outage.
+  try {
+    const transactionPages = await Promise.all((accountNames.length ? accountNames : ['']).map(async account => {
       const query = account ? `?limit=1000&account=${encodeURIComponent(account)}` : '?limit=1000';
       const response = await fetch(`/api/finance/transactions${query}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
-      return response.ok ? listOf(await response.json(), 'transactions') : [];
-    } catch { return []; }
-  }));
-  out.transactions = { transactions: transactionPages.flat() };
+      if (!response.ok) throw new Error(`transactions ${response.status}`);
+      return listOf(await response.json(), 'transactions');
+    }));
+    out.transactions = { transactions: transactionPages.flat() };
+  } catch {
+    out.transactions = null;
+  }
   return out;
 }
 
@@ -138,16 +144,24 @@ export function mapBridgeData(d) {
     name: a.account || "Account",
     institution: institutionLabel(a.institution),
     kind: kindOf(a.type, a.subtype),
-    currentBalance: a.balance ?? 0,
+    // Absent and zero are different facts: a missing balance stays null so the
+    // UI can render "—" instead of a fabricated $0.00.
+    currentBalance: a.balance ?? null,
     availableBalance: a.available_balance ?? null,
     creditLimit: a.credit_limit ?? null,
     last4: a.last4 || "",
     balanceAsOf: a.last_updated || todayIso(),
   }));
 
-  // map account names -> ids so transactions/holdings/liabilities can link
+  // Transactions reference accounts by their display alias. When two accounts
+  // share a name (e.g. two "Platinum Card" items), a name-keyed map would
+  // silently attach every match to the LAST account — real misattribution.
+  // Ambiguous names are therefore excluded from the map: the transaction keeps
+  // its accountName label and links to no accountId rather than the wrong one.
+  const nameCounts = new Map();
+  accounts.forEach((a) => { if (a.name) nameCounts.set(a.name, (nameCounts.get(a.name) || 0) + 1); });
   const byName = new Map();
-  accounts.forEach((a) => { if (a.name) byName.set(a.name, a.id); });
+  accounts.forEach((a) => { if (a.name && nameCounts.get(a.name) === 1) byName.set(a.name, a.id); });
   const acctId = (name) => (name && byName.get(name)) || "";
 
   const transactions = listOf(d.transactions, "transactions").map((t, i) => {
@@ -187,9 +201,9 @@ export function mapBridgeData(d) {
     accountName: h.account || "",
     ticker: h.ticker || "",
     name: h.name || (h.quantity != null && h.price ? `${h.quantity} sh @ ${h.price}` : h.ticker || "Holding"),
-    quantity: h.quantity ?? 0,
-    price: h.price ?? 0,
-    value: h.value ?? 0,
+    quantity: h.quantity ?? null,
+    price: h.price ?? null,
+    value: h.value ?? null,
     costBasis: h.cost_basis ?? null,
     isCash: !!h.is_cash,
     asOf: h.as_of || todayIso(),
@@ -200,7 +214,7 @@ export function mapBridgeData(d) {
     accountId: acctId(l.account),
     name: l.account || "Debt",
     kind: l.type === "loan" ? "loan" : "credit",
-    balance: l.balance ?? 0,
+    balance: l.balance ?? null,
     creditLimit: l.credit_limit ?? null,
     statementBalance: l.statement_balance ?? null,
     minimumPayment: l.minimum_payment ?? null,
