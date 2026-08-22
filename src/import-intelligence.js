@@ -1,4 +1,6 @@
 export function stableAccountId(account) {
+  const opaque = String(account.account_key || '').trim();
+  if (opaque) return `bridge-acct-${fnv1a(`key|${opaque}`)}`;
   const key = [account.institution, account.account || account.name, account.last4, account.type || account.kind, account.subtype]
     .map(normalizeText).join('|');
   return `bridge-acct-${fnv1a(key)}`;

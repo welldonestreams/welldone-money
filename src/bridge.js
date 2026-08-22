@@ -25,26 +25,50 @@ function todayIso() {
 export async function loadBridgeData() {
   const names = ["summary", "accounts", "recurring", "holdings", "liabilities", "status"];
   const out = {};
+  const failures = [];
   await Promise.all(names.map(async (n) => {
     try {
       const r = await fetch(`/api/finance/${n}`, {
         headers: { Accept: "application/json" },
         signal: AbortSignal.timeout(15000),
       });
-      out[n] = r.ok ? await r.json() : null;
+      if (!r.ok) { failures.push(n); out[n] = null; return; }
+      out[n] = await r.json();
     } catch {
+      failures.push(n);
       out[n] = null;
     }
   }));
-  const accountNames = [...new Set(listOf(out.accounts, 'accounts').map(account => String(account.account || '')).filter(Boolean))];
-  const transactionPages = await Promise.all((accountNames.length ? accountNames : ['']).map(async account => {
+  const accountRefs = [...new Map(listOf(out.accounts, 'accounts').map(account => {
+    const key = String(account.account_key || '').trim();
+    const alias = String(account.account || '').trim();
+    return [key || alias, { key, alias }];
+  }).filter(([ref]) => ref)).values()];
+  const transactionResults = await Promise.all((accountRefs.length ? accountRefs : [{ key: '', alias: '' }]).map(async account => {
+    const rows = [];
+    const pageSignatures = new Set();
+    let offset = 0;
     try {
-      const query = account ? `?limit=1000&account=${encodeURIComponent(account)}` : '?limit=1000';
-      const response = await fetch(`/api/finance/transactions${query}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
-      return response.ok ? listOf(await response.json(), 'transactions') : [];
-    } catch { return []; }
+      while (offset < 100000) {
+        const selector = account.key ? `account_key=${encodeURIComponent(account.key)}` : account.alias ? `account=${encodeURIComponent(account.alias)}` : '';
+        const query = `?limit=1000&offset=${offset}${selector ? `&${selector}` : ''}`;
+        const response = await fetch(`/api/finance/transactions${query}`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const page = listOf(await response.json(), 'transactions');
+        const signature = page.length === 1000 ? JSON.stringify([page[0], page.at(-1)]) : '';
+        if (signature && pageSignatures.has(signature)) throw new Error('transaction endpoint ignored pagination');
+        if (signature) pageSignatures.add(signature);
+        rows.push(...page);
+        if (page.length < 1000) return { account, rows, ok: true };
+        offset += page.length;
+      }
+      throw new Error('transaction pagination safety limit reached');
+    } catch { return { account, rows: [], ok: false }; }
   }));
-  out.transactions = { transactions: transactionPages.flat() };
+  out.transactions = { transactions: transactionResults.filter(result => result.ok).flatMap(result => result.rows) };
+  out._failures = failures;
+  out._transactionFailures = transactionResults.filter(result => !result.ok).map(result => result.account.key || result.account.alias);
+  out._successfulTransactionAccounts = transactionResults.filter(result => result.ok).map(result => result.account.key || result.account.alias);
   return out;
 }
 
@@ -54,18 +78,18 @@ export async function loadCardProfiles() {
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(15000),
     });
-    return response.ok ? await response.json() : [];
+    return response.ok ? await response.json() : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
 export async function loadImportData() {
   try {
     const response = await fetch('/api/imports', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
-    return response.ok ? await response.json() : { revision: 0, mappings: {}, accounts: [], batches: [], transactions: [] };
+    return response.ok ? await response.json() : null;
   } catch {
-    return { revision: 0, mappings: {}, accounts: [], batches: [], transactions: [] };
+    return null;
   }
 }
 
@@ -98,17 +122,17 @@ function payeeLabel(t) {
 export async function loadPrivateFinanceData() {
   try {
     const response = await fetch('/api/private-finance', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
-    return response.ok ? await response.json() : { investments: {}, incomeRules: [] };
+    return response.ok ? await response.json() : null;
   } catch {
-    return { investments: {}, incomeRules: [] };
+    return null;
   }
 }
 
 export async function loadRenewals() {
   try {
     const response = await fetch('/api/renewals', { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
-    return response.ok ? await response.json() : [];
-  } catch { return []; }
+    return response.ok ? await response.json() : null;
+  } catch { return null; }
 }
 
 export function applyPrivateIncomeRules(transactions, rules) {
@@ -133,36 +157,52 @@ function categoryLabel(value) {
 }
 
 export function mapBridgeData(d) {
-  const accounts = listOf(d.accounts, "accounts").map((a) => ({
+  const rawAccounts = listOf(d.accounts, "accounts");
+  const accounts = rawAccounts.map((a) => ({
     id: stableAccountId(a),
+    bridgeKey: String(a.account_key || ''),
     name: a.account || "Account",
     institution: institutionLabel(a.institution),
     kind: kindOf(a.type, a.subtype),
-    currentBalance: a.balance ?? 0,
+    currentBalance: a.balance ?? null,
     availableBalance: a.available_balance ?? null,
     creditLimit: a.credit_limit ?? null,
     last4: a.last4 || "",
     balanceAsOf: a.last_updated || todayIso(),
   }));
 
-  // map account names -> ids so transactions/holdings/liabilities can link
-  const byName = new Map();
-  accounts.forEach((a) => { if (a.name) byName.set(a.name, a.id); });
-  const acctId = (name) => (name && byName.get(name)) || "";
+  // Prefer the backend's opaque stable key. Legacy aliases are usable only
+  // when unique; duplicate display names must never silently route money to
+  // whichever account happened to be last in the response.
+  const byKey = new Map(accounts.filter(a => a.bridgeKey).map(a => [a.bridgeKey, a.id]));
+  const aliasGroups = new Map();
+  accounts.forEach((a) => { if (a.name) aliasGroups.set(a.name, [...(aliasGroups.get(a.name) || []), a.id]); });
+  const acctId = (item) => {
+    const key = String(item?.account_key || '');
+    if (key && byKey.has(key)) return byKey.get(key);
+    const ids = aliasGroups.get(String(item?.account || '')) || [];
+    return ids.length === 1 ? ids[0] : '';
+  };
 
-  const transactions = listOf(d.transactions, "transactions").map((t, i) => {
+  const transactionKeyCounts = new Map();
+  const transactions = listOf(d.transactions, "transactions").map((t) => {
+    const accountId = acctId(t);
+    const plaidAmount = t.amount == null || t.amount === '' ? NaN : (typeof t.amount === 'number' ? t.amount : Number(t.amount));
+    const baseKey = String(t.transaction_key || stableRowKey(t));
+    const occurrence = transactionKeyCounts.get(baseKey) || 0;
+    transactionKeyCounts.set(baseKey, occurrence + 1);
     const transaction = {
-      id: `bridge-tx-${i}`,
-      accountId: acctId(t.account),
+      id: `bridge-tx-${baseKey}${occurrence ? `#${occurrence}` : ''}`,
+      accountId,
       accountName: t.account || "",
-      accountKind: accounts.find(account => account.id === acctId(t.account))?.kind || '',
-      accountInstitution: accounts.find(account => account.id === acctId(t.account))?.institution || '',
+      accountKind: accounts.find(account => account.id === accountId)?.kind || '',
+      accountInstitution: accounts.find(account => account.id === accountId)?.institution || '',
       date: t.date || "",
       payee: payeeLabel(t),
       rawName: String(t.name || ''),
       category: categoryLabel(t.pfc_primary || (Array.isArray(t.category) && t.category[0]) || "Other"),
       // Plaid reports spending as positive; the dashboard ledger uses negative.
-      amount: -(typeof t.amount === "number" ? t.amount : Number(t.amount) || 0),
+      amount: Number.isFinite(plaidAmount) ? -plaidAmount : null,
       pending: !!t.pending,
       pfc_primary: String(t.pfc_primary || ''),
     };
@@ -171,25 +211,25 @@ export function mapBridgeData(d) {
 
   const recurring = listOf(d.recurring, "recurring").map((r, i) => ({
     id: `bridge-rec-${i}`,
-    accountId: acctId(r.account),
+    accountId: acctId(r),
     name: r.description || "Recurring",
     category: r.category || "Other",
     cadence: r.frequency || "",
     nextDate: r.next_date || "",
     lastDate: r.last_date || "",
-    amount: r.amount ?? 0,
+    amount: r.amount ?? null,
     kind: r.flow === "in" ? "inflow" : "outflow",
   }));
 
   const holdings = listOf(d.holdings, "holdings").map((h, i) => ({
     id: `bridge-hold-${i}`,
-    accountId: acctId(h.account),
+    accountId: acctId(h),
     accountName: h.account || "",
     ticker: h.ticker || "",
     name: h.name || (h.quantity != null && h.price ? `${h.quantity} sh @ ${h.price}` : h.ticker || "Holding"),
-    quantity: h.quantity ?? 0,
-    price: h.price ?? 0,
-    value: h.value ?? 0,
+    quantity: h.quantity ?? null,
+    price: h.price ?? null,
+    value: h.value ?? null,
     costBasis: h.cost_basis ?? null,
     isCash: !!h.is_cash,
     asOf: h.as_of || todayIso(),
@@ -197,10 +237,10 @@ export function mapBridgeData(d) {
 
   const liabilities = listOf(d.liabilities, "liabilities").map((l, i) => ({
     id: `bridge-liab-${i}`,
-    accountId: acctId(l.account),
+    accountId: acctId(l),
     name: l.account || "Debt",
     kind: l.type === "loan" ? "loan" : "credit",
-    balance: l.balance ?? 0,
+    balance: l.balance ?? null,
     creditLimit: l.credit_limit ?? null,
     statementBalance: l.statement_balance ?? null,
     minimumPayment: l.minimum_payment ?? null,
@@ -212,8 +252,11 @@ export function mapBridgeData(d) {
 
   const s = d.summary || {};
   const lastSync = s.last_successful_sync || null;
+  const accountErrors = Number(s.accounts_with_errors) || 0;
+  const partial = accountErrors > 0 || (d._failures || []).length > 0 || (d._transactionFailures || []).length > 0;
+  const resolveRef = (ref) => byKey.get(ref) || ((aliasGroups.get(ref) || []).length === 1 ? aliasGroups.get(ref)[0] : '');
   const sync = {
-    status: lastSync ? "healthy" : "error",
+    status: !lastSync ? "error" : partial ? "partial" : "healthy",
     lastSuccessfulSync: lastSync,
     dataAsOf: s.data_as_of || null,
     coverageStart: s.coverage_start || null,
@@ -223,7 +266,19 @@ export function mapBridgeData(d) {
     netWorth: s.linked_net_worth ?? null,
     itemsTracked: Number(d.status?.items_tracked) || 0,
     accountsConnected: Number(d.status?.accounts_connected) || accounts.length,
+    failedEndpoints: [...(d._failures || [])],
+    failedTransactionAccounts: [...(d._transactionFailures || [])],
+    successfulTransactionAccounts: [...(d._successfulTransactionAccounts || [])],
+    failedTransactionAccountIds: (d._transactionFailures || []).map(resolveRef).filter(Boolean),
+    successfulTransactionAccountIds: (d._successfulTransactionAccounts || []).map(resolveRef).filter(Boolean),
   };
 
   return { accounts, transactions, recurring, holdings, liabilities, sync };
+}
+
+function stableRowKey(row) {
+  const raw = [row.account_key, row.account, row.date, row.amount, row.name, row.merchant, row.pending].join('|');
+  let hash = 2166136261;
+  for (let index = 0; index < raw.length; index += 1) { hash ^= raw.charCodeAt(index); hash = Math.imul(hash, 16777619); }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }

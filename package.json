@@ -2,6 +2,7 @@
   "name": "welldone-money",
   "version": "0.1.1",
   "private": true,
+  "author": "welldonestreams <chanceweldon11@gmail.com>",
   "type": "module",
   "description": "WellDone Money \u2014 personal finance desktop app",
   "main": "electron/main.cjs",
@@ -12,8 +13,8 @@
     "dist": "npm run icons && electron-builder --win --publish never"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8"
+    "electron": "43.4.1",
+    "electron-builder": "26.15.3"
   },
   "build": {
     "appId": "com.welldonestreams.welldonemoney",
@@ -35,7 +36,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "deleteAppDataOnUninstall": true,
+      "deleteAppDataOnUninstall": false,
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",

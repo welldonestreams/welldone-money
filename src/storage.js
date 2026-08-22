@@ -9,7 +9,10 @@ export function loadState(storage = localStorage) {
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return freshState();
+    const recovered = freshState();
+    recovered.settings = { ...recovered.settings, storageWarning: 'Saved data could not be read. A recovery copy was preserved.' };
+    try { storage.setItem(`${STORAGE_KEY}.corrupt.${Date.now()}`, raw); } catch { /* preserve in memory when storage is full */ }
+    return recovered;
   }
   if (!parsed || typeof parsed !== 'object') return freshState();
   const migrated = migrateState(parsed);
@@ -54,11 +57,16 @@ export function saveState(state) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...state, schemaVersion: SCHEMA_VERSION }));
 }
 
+export function backupState(state, storage = localStorage, label = 'manual') {
+  const safeLabel = String(label).toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 30) || 'manual';
+  storage.setItem(`${STORAGE_KEY}.bak.${safeLabel}.${Date.now()}`, JSON.stringify({ ...state, schemaVersion: SCHEMA_VERSION }));
+}
+
 export function clearState(storage = localStorage) {
   const keys = [];
   for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index);
-    if (key === STORAGE_KEY || key?.startsWith(`${STORAGE_KEY}.bak.`)) keys.push(key);
+    if (key === STORAGE_KEY || key?.startsWith(`${STORAGE_KEY}.bak.`) || key?.startsWith(`${STORAGE_KEY}.corrupt.`)) keys.push(key);
   }
   keys.forEach(key => storage.removeItem(key));
 }
