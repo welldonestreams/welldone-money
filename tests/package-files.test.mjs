@@ -42,6 +42,9 @@ test('the shell keeps its security posture', () => {
   assert.match(main, /contextIsolation: true/);
   assert.match(main, /nodeIntegration: false/);
   assert.match(main, /sandbox: true/);
+  assert.match(main, /corsEnabled: true/);
+  assert.match(main, /setPermissionRequestHandler/);
+  assert.match(main, /safeExternalUrl/);
   assert.match(main, /requestSingleInstanceLock/);
   // registerSchemesAsPrivileged has to run before the app is ready, so it
   // must not be inside whenReady().
@@ -50,4 +53,5 @@ test('the shell keeps its security posture', () => {
   assert.ok(privileged !== -1 && ready !== -1 && privileged < ready,
     'registerSchemesAsPrivileged must run before app.whenReady()');
   assert.doesNotMatch(main, /child_process|spawn\(/, 'the shell must not spawn a server');
+  assert.equal(pkg.build.nsis.deleteAppDataOnUninstall, false, 'uninstall must preserve local financial data');
 });

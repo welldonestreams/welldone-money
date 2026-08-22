@@ -4,7 +4,7 @@
 // loopback HTTP server. See app-protocol.cjs for why. There is no child
 // process, no port, and no startup handshake: the window either loads or the
 // failure is shown in a dialog.
-const { app, BrowserWindow, Menu, dialog, protocol, screen, shell } = require('electron');
+const { app, BrowserWindow, Menu, dialog, protocol, screen, session, shell } = require('electron');
 const { readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
 const { SCHEME, ORIGIN, createHandler } = require('./app-protocol.cjs');
@@ -23,10 +23,17 @@ const MAX_SIZE = { width: 7680, height: 4320 };
 // insecure origin, which disables service workers and storage APIs.
 protocol.registerSchemesAsPrivileged([{
   scheme: SCHEME,
-  privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
 }]);
 
 let mainWindow = null;
+
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password ? url.href : '';
+  } catch { return ''; }
+}
 
 function stateFile() {
   return path.join(app.getPath('userData'), 'window-state.json');
@@ -135,14 +142,16 @@ function createWindow() {
   // A link to somewhere else belongs in the user's browser, not in a window
   // with no address bar.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    const external = safeExternalUrl(url);
+    if (external) shell.openExternal(external);
     return { action: 'deny' };
   });
   // Same rule for in-place navigation: nothing may replace the bundle.
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!url.startsWith(`${ORIGIN}/`)) {
       event.preventDefault();
-      shell.openExternal(url);
+      const external = safeExternalUrl(url);
+      if (external) shell.openExternal(external);
     }
   });
 
@@ -184,6 +193,10 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.whenReady().then(() => {
+    // Finance data never needs camera, location, notifications, clipboard
+    // read, or any other Chromium permission. Deny both checks and prompts.
+    session.defaultSession.setPermissionCheckHandler(() => false);
+    session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
     protocol.handle(SCHEME, createHandler(BUNDLE_ROOT));
     buildMenu();
     createWindow();

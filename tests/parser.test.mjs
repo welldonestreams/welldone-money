@@ -74,3 +74,10 @@ test('exports Actual-compatible CSV escaping commas and quotes', () => {
   assert.match(csv, /"Said ""hi"""/);
   assert.match(csv, /-10\.00,true/);
 });
+
+test('rejects blank amounts and impossible calendar dates', () => {
+  const csv = 'Date,Description,Amount\n02/30/2026,Impossible,10\n02/28/2026,Blank,\n';
+  const result = parseCsv(csv);
+  assert.equal(result.transactions.length, 0);
+  assert.equal(result.rejected.length, 2);
+});
