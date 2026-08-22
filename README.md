@@ -20,7 +20,8 @@ it. Windows SmartScreen warns on installers that are not code-signed; choose
   double-click wrapper for the same thing and needs Node installed.
 
 ## Structure
-- `electron/main.cjs` — spawns the local server, opens the window
+- `electron/main.cjs` — opens the sandboxed native window; it never starts a
+  server or binds a port
 - `electron/app-protocol.cjs` — serves the bundle over `app://`, with the
   security headers, and is unit-tested without Electron
 - `scripts/make-icons.mjs` — renders `assets/icon.svg` to `build/icon.ico`
@@ -28,3 +29,18 @@ it. Windows SmartScreen warns on installers that are not code-signed; choose
 - `index.html`, `src/`, `assets/`, `auth.css`, `sw.js` — the app
 - `BRIDGE-CONTRACT.md`, `DATA-MODEL.md` — the data model + API contract
   the finance adapter must honor (staleness fields, never silent-zero)
+
+## Data and uninstall behavior
+
+The desktop build is local-first. Manual accounts, statement imports, and app
+preferences stay in the Electron profile on this Windows account. Uninstalling
+the application preserves that profile so an accidental uninstall is not a
+data-loss event; use **Settings -> Clear local data** when deletion is intended.
+The app does not add its own at-rest encryption, so use Windows device
+encryption or BitLocker for protection when the computer is powered off.
+
+The packaged `app://` build does not embed the private server adapter or bank
+credentials. Hosted Plaid sync and server-authoritative household features are
+available only in a separately deployed, authenticated dashboard that follows
+`BRIDGE-CONTRACT.md`; the desktop app must remain useful with local imports
+when that service is unavailable.

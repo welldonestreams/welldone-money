@@ -37,7 +37,10 @@ test('authenticated import API deduplicates exact Plaid matches without dropping
       return res.end(JSON.stringify({ status: 'completed', item_id: 'private-provider-id' }));
     }
     if (req.url === '/v1/finance/accounts') return res.end(JSON.stringify({ accounts: [bridgeAccount] }));
-    if (req.url.startsWith('/v1/finance/transactions?limit=1000&account=Checking')) return res.end(JSON.stringify({ transactions: [{ account: 'Checking', date: '2026-07-20', amount: 12.34, merchant: 'Coffee Shop', pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: 'FOOD_AND_DRINK_COFFEE' }] }));
+    if (req.url.startsWith('/v1/finance/transactions?')) {
+      const query = new URL(req.url, 'http://bridge.test').searchParams;
+      if (query.get('account') === 'Checking' && query.get('offset') === '0') return res.end(JSON.stringify({ transactions: [{ account: 'Checking', date: '2026-07-20', amount: 12.34, merchant: 'Coffee Shop', pfc_primary: 'FOOD_AND_DRINK', pfc_detailed: 'FOOD_AND_DRINK_COFFEE' }] }));
+    }
     res.statusCode = 404; res.end('{}');
   });
   const bridgePort = await freePort();
@@ -110,4 +113,10 @@ test('authenticated import API deduplicates exact Plaid matches without dropping
   assert.equal(disk.batches.length, 1);
   assert.equal(disk.transactions.length, 3);
   assert.equal(disk.accounts.length, 1);
+  await writeFile(join(dataDir, 'imports.json'), '{broken');
+  const corruptRead = await fetch(`http://127.0.0.1:${port}/api/imports`, { headers: { cookie } });
+  assert.equal(corruptRead.status, 503);
+  const corruptWrite = await send();
+  assert.equal(corruptWrite.status, 503);
+  assert.equal(await readFile(join(dataDir, 'imports.json'), 'utf8'), '{broken');
 });

@@ -21,8 +21,10 @@ function sessionHash(sid) {
 }
 
 function createSession() {
+  const now = Date.now();
+  for (const [key, value] of sessions) if (!value || value.exp <= now) sessions.delete(key);
   const sid = randomBytes(32).toString("hex");
-  const exp = Date.now() + SESSION_HOURS * 3600 * 1000;
+  const exp = now + SESSION_HOURS * 3600 * 1000;
   sessions.set(sessionHash(sid), { exp });
   return sid;
 }
@@ -108,7 +110,7 @@ function loginForm(err) {
 
 
 import { readFile, stat } from "node:fs/promises";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { basename, extname, join, normalize, resolve, sep } from "node:path";
 import { buildPlaidMerchantModel, enrichStatementTransaction, normalizePlaidTransactions, plaidCoverageByAccount, reconcileImportedTransactions } from "./plaid-import-learning.mjs";
 
@@ -164,7 +166,9 @@ function send(res, code, body, type = "text/plain; charset=utf-8") {
 }
 
 async function serveStatic(req, res, urlPath) {
-  let rel = decodeURIComponent(urlPath);
+  let rel;
+  try { rel = decodeURIComponent(urlPath); }
+  catch { return send(res, 400, "invalid path\n"); }
   if (rel === "/") rel = "/index.html";
   const file = resolve(join(ROOT, "." + rel));
   if (!file.startsWith(ROOT + sep) && file !== ROOT) return send(res, 403, "forbidden\n");
@@ -192,7 +196,20 @@ async function serveStatic(req, res, urlPath) {
 async function proxyFinance(req, res, endpoint, query) {
   if (!WHITELIST.has(endpoint)) return send(res, 404, "not found\n");
   if (!BRIDGE_TOKEN) return send(res, 503, "bridge token not configured\n");
-  const qs = query && query.length > 1 ? "?" + query : "";
+  let qs = "";
+  if (query) {
+    const input = new URLSearchParams(query);
+    if (endpoint !== "transactions" && [...input.keys()].length) return send(res, 400, "query not supported\n");
+    if (endpoint === "transactions") {
+      if ([...input.keys()].some(key => !["limit", "offset", "account", "account_key"].includes(key))) return send(res, 400, "invalid query\n");
+      const safe = new URLSearchParams();
+      safe.set("limit", String(Math.max(1, Math.min(1000, Number(input.get("limit")) || 1000))));
+      safe.set("offset", String(Math.max(0, Math.min(100000, Number(input.get("offset")) || 0))));
+      if (input.get("account")) safe.set("account", input.get("account").slice(0, 160));
+      if (input.get("account_key")) safe.set("account_key", input.get("account_key").slice(0, 160));
+      qs = `?${safe}`;
+    }
+  }
   const target = `${BRIDGE}/v1/finance/${endpoint}${qs}`;
   try {
     const resp = await fetch(target, {
@@ -203,8 +220,8 @@ async function proxyFinance(req, res, endpoint, query) {
     // pass through status + JSON (bridge already sanitizes; metadata preserved)
     res.writeHead(resp.status, { ...HEADERS, "Content-Type": "application/json; charset=utf-8" });
     res.end(body);
-  } catch (e) {
-    send(res, 502, JSON.stringify({ error: "upstream unavailable", detail: String(e).slice(0, 120) }));
+  } catch {
+    send(res, 502, JSON.stringify({ error: "upstream unavailable" }));
   }
 }
 
@@ -226,10 +243,18 @@ function loadPrivateFinance() {
   }
 }
 
-function readBody(req) {
+function readBody(req, maxBytes = 64 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
+    let bytes = 0;
+    req.on("data", (c) => {
+      bytes += c.length;
+      if (bytes > maxBytes) {
+        reject(Object.assign(new Error("request too large"), { status: 413 }));
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => {
       try { resolve(JSON.parse(Buffer.concat(chunks).toString())); }
       catch { reject(Object.assign(new Error("invalid JSON"), { status: 400 })); }
@@ -244,11 +269,12 @@ function sendJson(res, status, body) {
 }
 
 function loadCardProfiles() {
+  if (!existsSync(CARD_PROFILES_FILE)) return [];
   try {
     const parsed = JSON.parse(readFileSync(CARD_PROFILES_FILE, "utf8"));
     return Array.isArray(parsed) ? parsed.map(sanitizeCardProfile).filter(Boolean) : [];
   } catch {
-    return [];
+    throw Object.assign(new Error("card profile store is corrupt; writes are disabled until it is recovered"), { status: 503 });
   }
 }
 
@@ -312,6 +338,7 @@ function emptyImportStore() {
 }
 
 function loadImportStore() {
+  if (!existsSync(IMPORTS_FILE)) return emptyImportStore();
   try {
     const parsed = JSON.parse(readFileSync(IMPORTS_FILE, "utf8"));
     return {
@@ -324,12 +351,27 @@ function loadImportStore() {
       transactions: Array.isArray(parsed.transactions) ? parsed.transactions.slice(-100000) : [],
     };
   } catch {
-    return emptyImportStore();
+    throw Object.assign(new Error("import store is corrupt; writes are disabled until it is recovered"), { status: 503 });
   }
+}
+
+async function readTextBody(req, maxBytes) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of req) {
+    bytes += chunk.length;
+    if (bytes > maxBytes) throw Object.assign(new Error("request too large"), { status: 413 });
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString();
 }
 
 function saveImportStore(store) {
   const tmp = IMPORTS_FILE + ".tmp";
+  if (existsSync(IMPORTS_FILE)) {
+    copyFileSync(IMPORTS_FILE, IMPORTS_FILE + ".bak");
+    chmodSync(IMPORTS_FILE + ".bak", 0o600);
+  }
   writeFileSync(tmp, JSON.stringify(store, null, 2), { encoding: "utf8", mode: 0o600 });
   renameSync(tmp, IMPORTS_FILE);
   chmodSync(IMPORTS_FILE, 0o600);
@@ -346,21 +388,43 @@ async function readJsonBody(req, maxBytes = 6 * 1024 * 1024) {
   return JSON.parse(Buffer.concat(chunks).toString());
 }
 
-async function bridgeList(endpoint, key) {
-  if (!BRIDGE_TOKEN || !BRIDGE) return [];
+async function bridgeList(endpoint, key, { strict = false } = {}) {
+  if (!BRIDGE_TOKEN || !BRIDGE) {
+    if (strict) throw Object.assign(new Error("bridge unavailable"), { status: 502 });
+    return [];
+  }
   try {
     const response = await fetch(`${BRIDGE}/v1/finance/${endpoint}`, {
       headers: { "X-Finance-Token": BRIDGE_TOKEN, Accept: "application/json" },
       signal: AbortSignal.timeout(20000),
     });
-    if (!response.ok) return [];
+    if (!response.ok) {
+      if (strict) throw Object.assign(new Error("bridge page unavailable"), { status: 502 });
+      return [];
+    }
     const payload = await response.json();
     if (Array.isArray(payload)) return payload;
     if (Array.isArray(payload?.[key])) return payload[key];
     return Object.values(payload || {}).find(Array.isArray) || [];
-  } catch {
+  } catch (error) {
+    if (strict) throw Object.assign(error, { status: error.status || 502 });
     return [];
   }
+}
+
+async function bridgeListAll(endpoint, key) {
+  const rows = [];
+  const signatures = new Set();
+  for (let offset = 0; offset < 100000; offset += 1000) {
+    const separator = endpoint.includes("?") ? "&" : "?";
+    const page = await bridgeList(`${endpoint}${separator}limit=1000&offset=${offset}`, key, { strict: true });
+    const signature = page.length === 1000 ? JSON.stringify([page[0], page.at(-1)]) : "";
+    if (signature && signatures.has(signature)) throw Object.assign(new Error("bridge ignored pagination"), { status: 502 });
+    if (signature) signatures.add(signature);
+    rows.push(...page);
+    if (page.length < 1000) return rows;
+  }
+  throw new Error("bridge pagination safety limit reached");
 }
 
 function stableBridgeAccountId(account) {
@@ -434,7 +498,7 @@ async function currentPlaidContext(rawAccounts = null, rawTransactions = null) {
   const accountByName = new Map(accounts.map(account => [String(account.account || account.name || ""), stableBridgeAccountId(account)]));
   const transactions = rawTransactions || (await Promise.all(accounts.map(account => {
     const name = String(account.account || account.name || "");
-    return bridgeList(`transactions?limit=1000&account=${encodeURIComponent(name)}`, "transactions");
+    return bridgeListAll(`transactions?account=${encodeURIComponent(name)}`, "transactions");
   }))).flat();
   const plaid = normalizePlaidTransactions(transactions, accountByName);
   return { accounts, accountByName, plaid, coverage: plaidCoverageByAccount(plaid), model: buildPlaidMerchantModel(plaid) };
@@ -548,9 +612,10 @@ const server = http.createServer(async (req, res) => {
       return res.end(loginForm(""));
     }
     if (req.method !== "POST") return send(res, 405, "method not allowed\n");
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    const pin = new URLSearchParams(Buffer.concat(chunks).toString()).get("p") || "";
+    let form;
+    try { form = await readTextBody(req, 1024); }
+    catch (error) { return send(res, error.status || 400, `${error.message}\n`); }
+    const pin = new URLSearchParams(form).get("p") || "";
     if (!PIN || !pinCheck(ip, pin)) {
       res.writeHead(401, { ...HEADERS, "Content-Type": "text/html; charset=utf-8" });
       return res.end(loginForm("Wrong PIN — try again"));
@@ -636,14 +701,16 @@ const server = http.createServer(async (req, res) => {
   // Private card-product selections. The public repo contains only the generic
   // issuer catalog; household ownership lives in this authenticated data file.
   if (url.pathname === "/api/card-profiles" && req.method === "GET") {
-    return send(res, 200, JSON.stringify(loadCardProfiles()), "application/json; charset=utf-8");
+    try { return sendJson(res, 200, loadCardProfiles()); }
+    catch (error) { return sendJson(res, error.status || 503, { error: error.message }); }
   }
   if (url.pathname === "/api/card-profiles" && req.method === "PUT") {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
     let data;
-    try { data = JSON.parse(Buffer.concat(chunks).toString()); } catch { return send(res, 400, "invalid JSON\n"); }
+    try { data = await readBody(req, 128 * 1024); }
+    catch (error) { return send(res, error.status || 400, `${error.message}\n`); }
     if (!Array.isArray(data) || data.length > 100) return send(res, 400, "expected an array with at most 100 entries\n");
+    try { loadCardProfiles(); }
+    catch (error) { return sendJson(res, error.status || 503, { error: error.message }); }
     const clean = data.map(sanitizeCardProfile).filter(Boolean);
     saveCardProfiles(clean);
     return send(res, 200, JSON.stringify({ ok: true, count: clean.length }), "application/json; charset=utf-8");
@@ -654,7 +721,8 @@ const server = http.createServer(async (req, res) => {
   // Durable statement backfill. Raw files never reach the server; the browser
   // submits normalized transactions and audit metadata after confirmation.
   if (url.pathname === "/api/imports" && req.method === "GET") {
-    return send(res, 200, JSON.stringify(loadImportStore()), "application/json; charset=utf-8");
+    try { return sendJson(res, 200, loadImportStore()); }
+    catch (error) { return sendJson(res, error.status || 503, { error: error.message }); }
   }
   if (url.pathname === "/api/imports/reconcile" && req.method === "POST") {
     return send(res, 503, JSON.stringify({ error: "automatic Plaid reconciliation is paused pending a non-destructive ledger repair" }), "application/json; charset=utf-8");
@@ -663,7 +731,7 @@ const server = http.createServer(async (req, res) => {
     try {
       return send(res, 201, JSON.stringify(createStatementAccount(await readJsonBody(req, 64 * 1024))), "application/json; charset=utf-8");
     } catch (error) {
-      return send(res, 400, JSON.stringify({ error: String(error?.message || error).slice(0, 160) }), "application/json; charset=utf-8");
+      return send(res, error.status || 400, JSON.stringify({ error: String(error?.message || error).slice(0, 160) }), "application/json; charset=utf-8");
     }
   }
   if (url.pathname === "/api/imports/commit" && req.method === "POST") {
@@ -673,7 +741,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, JSON.stringify(result), "application/json; charset=utf-8");
     } catch (error) {
       const message = String(error?.message || error).slice(0, 160);
-      const code = message === "request too large" ? 413 : 400;
+      const code = error.status || (message === "request too large" ? 413 : 400);
       return send(res, code, JSON.stringify({ error: message }), "application/json; charset=utf-8");
     }
   }

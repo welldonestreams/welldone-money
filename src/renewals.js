@@ -10,6 +10,10 @@ const $ = (id) => document.getElementById(id);
 function esc(s) {
   return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
+function safeHttpUrl(value) {
+  try { const url = new URL(String(value || "")); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password ? url.href : ""; }
+  catch { return ""; }
+}
 function money(n) { return "$" + Number(n || 0).toFixed(2); }
 function daysLeft(dateStr) {
   if (!dateStr) return null;
@@ -219,7 +223,7 @@ function render() {
     <div class="rn-card" data-i="${s._i}">
       <div class="rn-card-main" data-edit="${s._i}">
         <strong>${esc(s.name)}</strong>
-        <span class="rn-note">${s.note ? esc(s.note) : ""}${s.url ? ` <a href="${esc(s.url)}" target="_blank" rel="noopener">↗</a>` : ""}</span>
+        <span class="rn-note">${s.note ? esc(s.note) : ""}${safeHttpUrl(s.url) ? ` <a href="${esc(safeHttpUrl(s.url))}" target="_blank" rel="noopener noreferrer">↗</a>` : ""}</span>
         <span class="rn-meta">${s.date ? fmtDate(s.date) : "No date"} · ${renewalLabel(s)}</span>
         ${Array.isArray(s.history) && s.history.length ? `<span class="rn-paid">Paid ${fmtDate(s.history[s.history.length - 1].paid)}</span>` : ""}
       </div>

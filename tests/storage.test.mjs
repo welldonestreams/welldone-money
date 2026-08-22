@@ -52,3 +52,12 @@ test('clear removes active state and migration stashes', () => {
   assert.equal(values.has('finance-hub-state.bak.v1.100'), false);
   assert.equal(values.get('unrelated'), 'keep');
 });
+
+test('corrupt state is preserved instead of silently overwritten', () => {
+  const values = new Map([['finance-hub-state', '{broken']]);
+  const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+  const state = loadState(storage);
+  assert.match(state.settings.storageWarning, /recovery copy/i);
+  assert.equal([...values.values()].includes('{broken'), true);
+  assert.equal(values.get('finance-hub-state'), '{broken');
+});

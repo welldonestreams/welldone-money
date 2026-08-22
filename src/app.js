@@ -1,5 +1,5 @@
-import { parseStatementFile, toActualCsv } from './parser.js';
-import { clearState, downloadJson, downloadText, loadState, migrateState, saveState } from './storage.js';
+import { dedupeTransactions, parseStatementFile, toActualCsv } from './parser.js';
+import { backupState, clearState, downloadJson, downloadText, loadState, migrateState, saveState } from './storage.js';
 import { sampleState } from './demo.js';
 import { financeSummary, holdingReturn, investmentTotals, monthlyFlow, spendingByCategory, transactionFlow } from './finance-model.js';
 import { applyPrivateIncomeRules, loadBridgeData, loadCardProfiles, loadImportData, loadPrivateFinanceData, loadRenewals, mapBridgeData } from './bridge.js';
@@ -15,6 +15,9 @@ const compactMoney = new Intl.NumberFormat('en-US', { style: 'currency', currenc
 const shortDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
+const reportedMoney = value => value == null || value === '' || !Number.isFinite(Number(value)) ? 'Not reported' : money.format(Number(value));
+const hasServerAdapter = location.protocol === 'http:' || location.protocol === 'https:';
+const safeHttpUrl = value => { try { const url = new URL(String(value || '')); return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : ''; } catch { return ''; } };
 
 const viewCopy = {
   dashboard: ['YOUR MONEY', greeting(), 'A calm, complete view of what you own, owe, earn, and spend.'],
@@ -41,6 +44,10 @@ function render() {
   renderBenefits(data);
   renderImports();
   applyDataCss();
+  for (const button of $$('.link-plaid')) {
+    button.disabled = !hasServerAdapter;
+    button.title = hasServerAdapter ? '' : 'Plaid linking is available in the authenticated hosted dashboard. Use statement imports in the desktop app.';
+  }
 }
 
 function displayState() {
@@ -54,6 +61,12 @@ function isPreview() {
 }
 
 function renderStatus(data) {
+  if (!hasServerAdapter) {
+    $('#sidebar-status-dot').classList.remove('healthy');
+    $('#sidebar-status').textContent = 'Desktop local mode';
+    $('#sidebar-sync').textContent = 'Statement imports stay on this device';
+    return;
+  }
   const healthy = data.sync?.status === 'healthy';
   $('#sidebar-status-dot').classList.toggle('healthy', healthy);
   $('#sidebar-status').textContent = isPreview() ? 'Preview data' : healthy ? 'Bridge healthy' : 'Local data';
@@ -101,6 +114,12 @@ function renderAccounts(data) {
   $('#plaid-account-coverage').textContent = Number.isFinite(connected) ? `${connected} accounts synced` : '— accounts synced';
   $('#settings-plaid-items').textContent = Number.isFinite(items) ? `${items} of 10 tracked` : '— of 10 tracked';
   $('#settings-plaid-accounts').textContent = Number.isFinite(connected) ? String(connected) : '—';
+  if (!hasServerAdapter) {
+    $('#plaid-item-coverage').textContent = 'Hosted dashboard only';
+    $('#plaid-account-coverage').textContent = 'Use local statement imports here';
+    $('#settings-plaid-items').textContent = 'Hosted dashboard only';
+    $('#settings-plaid-accounts').textContent = 'Not connected in desktop mode';
+  }
   $('#accounts-grid').innerHTML = data.accounts.map(account => accountCard(account, editable)).join('') || empty('Connect the bridge, add an account, or import a private profile backup.');
 }
 
@@ -131,11 +150,11 @@ function accountCard(account, editable) {
   const snapshotAction = editable && !account.balanceAsOf && !isPlaid ? `<button class="text-button edit-account snapshot-action" data-id="${escapeHtml(account.id)}">Add optional balance</button>` : '';
   const canImport = editable && ['credit', 'checking', 'savings'].includes(account.kind);
   const importer = canImport ? `<label class="account-statement-drop" title="Import directly into ${escapeHtml(account.name)}"><input class="account-file-input" type="file" accept=".qfx,.ofx,.qbo,.csv,text/csv" multiple data-account-id="${escapeHtml(account.id)}"><span>Drop CSV, QFX, or OFX here</span><small>Imports directly to this account and skips duplicates</small></label>` : '';
-  return `<article class="account-card ${accentClass}" data-account-drop="${escapeHtml(account.id)}"><header><div><span class="institution">${escapeHtml(account.institution || account.kind)}</span><h3>${escapeHtml(account.name)}</h3></div>${editable && !isPlaid ? `<div class="account-actions"><button class="text-button edit-account" data-id="${escapeHtml(account.id)}">Edit</button>${isServerOwned(account.id) ? '' : `<button class="text-button text-button--danger remove-account" data-id="${escapeHtml(account.id)}">Remove</button>`}</div>` : isPlaid ? '<span class="plaid-badge">Plaid</span>' : '<span class="sample-tag">Sample</span>'}</header><div class="balance money ${numeric(account.currentBalance) < 0 ? 'negative' : ''}">${money.format(numeric(account.currentBalance))}</div><footer><span class="muted">${snapshot}</span><span>${escapeHtml(account.kind)}</span></footer>${snapshotAction}${owed ? `<dl><dt>Statement</dt><dd class="money">${money.format(numeric(account.statementBalance))}</dd><dt>Minimum</dt><dd class="money">${money.format(numeric(account.minimumDue))}</dd><dt>Due</dt><dd>${account.dueDate ? formatDate(account.dueDate) : '—'}</dd></dl>` : ''}${importer}</article>`;
+  return `<article class="account-card ${accentClass}" data-account-drop="${escapeHtml(account.id)}"><header><div><span class="institution">${escapeHtml(account.institution || account.kind)}</span><h3>${escapeHtml(account.name)}</h3></div>${editable && !isPlaid ? `<div class="account-actions"><button class="text-button edit-account" data-id="${escapeHtml(account.id)}">Edit</button>${isServerOwned(account.id) ? '' : `<button class="text-button text-button--danger remove-account" data-id="${escapeHtml(account.id)}">Remove</button>`}</div>` : isPlaid ? '<span class="plaid-badge">Plaid</span>' : '<span class="sample-tag">Sample</span>'}</header><div class="balance money ${numeric(account.currentBalance) < 0 ? 'negative' : ''}">${reportedMoney(account.currentBalance)}</div><footer><span class="muted">${snapshot}</span><span>${escapeHtml(account.kind)}</span></footer>${snapshotAction}${owed ? `<dl><dt>Statement</dt><dd class="money">${reportedMoney(account.statementBalance)}</dd><dt>Minimum</dt><dd class="money">${reportedMoney(account.minimumDue)}</dd><dt>Due</dt><dd>${account.dueDate ? formatDate(account.dueDate) : '—'}</dd></dl>` : ''}${importer}</article>`;
 }
 
 function accountCompactRow(account) {
-  return `<div class="compact-account"><span class="account-icon account-icon--${escapeHtml(account.kind)}">${escapeHtml(account.name.slice(0, 1))}</span><div><strong>${escapeHtml(account.name)}</strong><small>${escapeHtml(account.institution || account.kind)}</small></div><strong class="money">${money.format(numeric(account.currentBalance))}</strong></div>`;
+  return `<div class="compact-account"><span class="account-icon account-icon--${escapeHtml(account.kind)}">${escapeHtml(account.name.slice(0, 1))}</span><div><strong>${escapeHtml(account.name)}</strong><small>${escapeHtml(account.institution || account.kind)}</small></div><strong class="money">${reportedMoney(account.currentBalance)}</strong></div>`;
 }
 
 function renderTransactions(data) {
@@ -154,7 +173,7 @@ function renderTransactions(data) {
   const search = ($('#transaction-search')?.value || '').trim().toLowerCase();
   const matches = data.transactions.filter(transaction => !search || [transaction.payee, transaction.notes, transaction.category, accountName(transaction.accountId, data)].some(value => String(value || '').toLowerCase().includes(search))).slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 500);
   $('#transaction-count').textContent = `${data.transactions.length} transactions · showing ${matches.length}`;
-  $('#transaction-list').innerHTML = matches.length ? `<div class="transaction-table" role="table"><div class="transaction-row transaction-header" role="row"><span>Date</span><span>Account</span><span>Merchant</span><span>Category</span><span>Amount</span></div>${matches.map(item => `<div class="transaction-row" role="row"><span>${escapeHtml(item.date)}</span><span>${escapeHtml(accountName(item.accountId, data))}</span><span><strong>${escapeHtml(item.payee)}</strong>${item.notes ? `<small>${escapeHtml(item.notes)}</small>` : ''}</span><span>${escapeHtml(item.category || 'Uncategorized')}</span><span class="money ${numeric(item.amount) < 0 ? 'negative' : 'positive'}">${money.format(numeric(item.amount))}</span></div>`).join('')}</div>` : empty('No transactions match this view.');
+  $('#transaction-list').innerHTML = matches.length ? `<div class="transaction-table" role="table"><div class="transaction-row transaction-header" role="row"><span>Date</span><span>Account</span><span>Merchant</span><span>Category</span><span>Amount</span></div>${matches.map(item => `<div class="transaction-row" role="row"><span>${escapeHtml(item.date)}</span><span>${escapeHtml(accountName(item.accountId, data))}</span><span><strong>${escapeHtml(item.payee)}</strong>${item.notes ? `<small>${escapeHtml(item.notes)}</small>` : ''}</span><span>${escapeHtml(item.category || 'Uncategorized')}</span><span class="money ${numeric(item.amount) < 0 ? 'negative' : 'positive'}">${reportedMoney(item.amount)}</span></div>`).join('')}</div>` : empty('No transactions match this view.');
   applyDataCss($('#view-transactions'));
 }
 
@@ -181,7 +200,7 @@ function renderInvestments(data) {
   $('#investment-chart').innerHTML = investmentChart(meta, investmentRange, data);
   $$('#investment-ranges button').forEach(button => button.classList.toggle('active', button.dataset.range === investmentRange));
   $('#holding-count').textContent = `${data.holdings.length} fund${data.holdings.length === 1 ? '' : 's'}`;
-  $('#holdings-list').innerHTML = data.holdings.length ? `<div class="holding-table"><div class="holding-row holding-header"><span>Fund</span><span>Account</span><span>Recorded contributions</span><span>Current value</span><span>Return</span></div>${data.holdings.map(item => { const performance = holdingReturn(item, investmentRange); return `<div class="holding-row"><span><strong>${escapeHtml(item.ticker || '—')}</strong><small>${escapeHtml(item.name || '')}</small></span><span>${escapeHtml(accountName(item.accountId, data))}</span><span class="money">${item.costBasis == null ? 'Not reported' : money.format(numeric(item.costBasis))}</span><span class="money">${money.format(numeric(item.value))}</span><span class="money ${performance ? (performance.rate >= 0 ? 'positive' : 'negative') : ''}">${performance ? `${performance.rate.toFixed(2)}%${performance.scope ? `<small>${escapeHtml(performance.scope)}</small>` : ''}` : 'Not available'}</span></div>`; }).join('')}</div>` : empty('No investment funds connected.');
+  $('#holdings-list').innerHTML = data.holdings.length ? `<div class="holding-table"><div class="holding-row holding-header"><span>Fund</span><span>Account</span><span>Recorded contributions</span><span>Current value</span><span>Return</span></div>${data.holdings.map(item => { const performance = holdingReturn(item, investmentRange); return `<div class="holding-row"><span><strong>${escapeHtml(item.ticker || '—')}</strong><small>${escapeHtml(item.name || '')}</small></span><span>${escapeHtml(accountName(item.accountId, data))}</span><span class="money">${reportedMoney(item.costBasis)}</span><span class="money">${reportedMoney(item.value)}</span><span class="money ${performance ? (performance.rate >= 0 ? 'positive' : 'negative') : ''}">${performance ? `${performance.rate.toFixed(2)}%${performance.scope ? `<small>${escapeHtml(performance.scope)}</small>` : ''}` : 'Not available'}</span></div>`; }).join('')}</div>` : empty('No investment funds connected.');
   applyDataCss($('#view-investments'));
 }
 
@@ -327,7 +346,8 @@ function benefitCard(benefit, data, editable) {
   const amount = Math.max(0, numeric(benefit.amount));
   const used = Math.min(amount, Math.max(0, numeric(benefit.usedAmount)));
   const percent = amount ? Math.round(used / amount * 100) : 0;
-  const source = benefit.sourceUrl ? `<a class="benefit-source" href="${escapeHtml(benefit.sourceUrl)}" target="_blank" rel="noreferrer">Official terms</a>` : '';
+  const sourceUrl = safeHttpUrl(benefit.sourceUrl);
+  const source = sourceUrl ? `<a class="benefit-source" href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener noreferrer">Official terms</a>` : '';
   const detection = benefit.detectionCount
     ? `<div class="benefit-meta benefit-meta--detected"><span>Auto-detected from ${benefit.detectionCount} posted issuer credit${benefit.detectionCount === 1 ? '' : 's'}</span><span>${benefit.lastDetectedAt ? formatDate(benefit.lastDetectedAt) : ''}</span></div>${benefit.capExceeded ? `<div class="benefit-meta"><span>Observed credit ${money.format(benefit.detectedUsedAmount)} exceeded the tracked cap; verify current issuer terms.</span></div>` : ''}`
     : benefit.lastObservedCreditAt ? `<div class="benefit-meta"><span>Last posted issuer credit was ${money.format(benefit.lastObservedCreditAmount)} in a prior period</span><span>${formatDate(benefit.lastObservedCreditAt)}</span></div>`
@@ -421,6 +441,18 @@ async function commitImport(index) {
   item.importing = true;
   renderImports();
   try {
+    if (!hasServerAdapter) {
+      const incoming = item.transactions.map(transaction => ({ ...transaction, accountId: item.accountId, importedAt: new Date().toISOString() }));
+      const { accepted, duplicates } = dedupeTransactions(state.transactions, incoming);
+      state.transactions.push(...accepted);
+      state.imports.push({ id: `local:${item.fileHash.slice(0, 20)}`, fileHash: item.fileHash, filename: item.filename, format: item.format, institution: item.institution, last4: item.last4, accountId: item.accountId, accepted: accepted.length, duplicates: duplicates.length, rejected: item.rejected.length, importedAt: new Date().toISOString() });
+      state.importMappings[item.signature] = { accountId: item.accountId, confirmedAt: new Date().toISOString() };
+      state.importRevision = Math.max(0, Number(state.importRevision) || 0) + 1;
+      pendingImports.splice(index, 1);
+      persist();
+      toast(`${accepted.length} local transactions added; ${duplicates.length} duplicates skipped.`);
+      return true;
+    }
     const response = await fetch('/api/imports/commit', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify({ fileHash: item.fileHash, filename: item.filename, format: item.format, institution: item.institution, last4: item.last4, signature: item.signature, accountId: item.accountId, transactions: item.transactions, rejected: item.rejected.length, confidence: item.match?.confidence || 0 }) });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `Import failed (${response.status})`);
@@ -589,6 +621,10 @@ document.addEventListener('click', event => {
 });
 
 async function startPlaidLink(button) {
+  if (!hasServerAdapter) {
+    toast('Plaid linking requires the authenticated hosted dashboard. Import a statement here instead.');
+    return;
+  }
   const original = button.textContent;
   const popup = window.open('about:blank', '_blank');
   if (popup) popup.opener = null;
@@ -648,7 +684,22 @@ document.addEventListener('dragleave', event => { const tile = event.target.clos
 document.addEventListener('drop', event => { const tile = event.target.closest?.('[data-account-drop]'); if (!tile) return; event.preventDefault(); tile.classList.remove('account-card--drag'); if (event.dataTransfer?.files?.length) receiveFiles(event.dataTransfer.files, tile.dataset.accountDrop, true); });
 $('#export-actual').addEventListener('click', exportActual);
 $('#export-profile').addEventListener('click', () => { if (!confirm('This backup is unencrypted and contains normalized transactions. Store it securely. Continue?')) return; downloadJson(`well-done-money-backup-UNENCRYPTED-${today()}.json`, state); });
-$('#profile-input').addEventListener('change', async event => { try { const parsed = JSON.parse(await event.target.files[0].text()); if (!parsed || !Array.isArray(parsed.accounts)) throw new Error('Invalid WellDone Money backup'); state = migrateState(parsed); persist(); toast('Profile restored.'); } catch (error) { toast(error.message); } });
+$('#profile-input').addEventListener('change', async event => {
+  try {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) throw new Error('Backup is larger than the 20 MB safety limit.');
+    const parsed = JSON.parse(await file.text());
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.accounts) || !Array.isArray(parsed.transactions)) throw new Error('Invalid WellDone Money backup');
+    if (parsed.accounts.length > 1000 || parsed.transactions.length > 200000) throw new Error('Backup exceeds the supported record limits.');
+    if (!confirm(`Replace this profile with ${parsed.accounts.length} accounts and ${parsed.transactions.length} transactions? A recovery copy of the current profile will be kept.`)) return;
+    backupState(state, localStorage, 'before-import');
+    state = migrateState(parsed);
+    persist();
+    toast('Profile restored.');
+  } catch (error) { toast(error.message); }
+  finally { event.target.value = ''; }
+});
 $('#clear-data').addEventListener('click', () => { if (!confirm('Delete WellDone Money data from this browser?')) return; clearState(); state = loadState(); render(); toast('Local data cleared.'); });
 const dropzone = $('#dropzone');
 ['dragenter', 'dragover'].forEach(name => dropzone.addEventListener(name, event => { event.preventDefault(); dropzone.classList.add('drag'); }));
@@ -669,35 +720,49 @@ async function refreshBridge() {
     if (!m.accounts.length) return;
     const keepLocal = (list, prefix) => (list || []).filter(item => !String(item.id || '').startsWith(prefix));
     const localAccounts = (state.accounts || []).filter(item => !isServerOwned(item.id));
-    const privateAccounts = Array.isArray(privateFinance.investments?.accounts) ? privateFinance.investments.accounts : [];
-    state.accounts = [...localAccounts, ...m.accounts, ...(Array.isArray(importData.accounts) ? importData.accounts : []), ...privateAccounts];
+    const priorStatementAccounts = (state.accounts || []).filter(item => String(item.id || '').startsWith('statement-acct-'));
+    const priorPrivateAccounts = (state.accounts || []).filter(item => String(item.id || '').startsWith('private-investment-'));
+    const statementAccounts = importData && Array.isArray(importData.accounts) ? importData.accounts : priorStatementAccounts;
+    const privateAccounts = privateFinance && Array.isArray(privateFinance.investments?.accounts) ? privateFinance.investments.accounts : priorPrivateAccounts;
+    state.accounts = [...localAccounts, ...m.accounts, ...statementAccounts, ...privateAccounts];
+    const priorBridgeTransactions = (state.transactions || []).filter(item => String(item.id || '').startsWith('bridge-tx-'));
     const manualTransactions = (state.transactions || []).filter(item => !String(item.id || '').startsWith('bridge-tx-') && !String(item.id || '').startsWith('import:'));
-    state.transactions = applyPrivateIncomeRules([...manualTransactions, ...m.transactions, ...(Array.isArray(importData.transactions) ? importData.transactions : [])], privateFinance.incomeRules);
-    state.recurring = [...keepLocal(state.recurring, 'bridge-rec-'), ...m.recurring];
-    const privateHoldings = Array.isArray(privateFinance.investments?.holdings) ? privateFinance.investments.holdings : [];
-    state.holdings = [...keepLocal(state.holdings, 'bridge-hold-').filter(item => !String(item.id || '').startsWith('private-investment-')), ...m.holdings, ...privateHoldings];
-    state.liabilities = [...keepLocal(state.liabilities, 'bridge-liab-'), ...m.liabilities];
+    const priorImportedTransactions = (state.transactions || []).filter(item => String(item.id || '').startsWith('import:'));
+    const failedIds = new Set(m.sync.failedTransactionAccountIds || []);
+    const preservedBridgeTransactions = priorBridgeTransactions.filter(item => failedIds.has(item.accountId));
+    const importedTransactions = importData && Array.isArray(importData.transactions) ? importData.transactions : priorImportedTransactions;
+    state.transactions = applyPrivateIncomeRules([...manualTransactions, ...preservedBridgeTransactions, ...m.transactions, ...importedTransactions], privateFinance?.incomeRules || []);
+    if (!m.sync.failedEndpoints.includes('recurring')) state.recurring = [...keepLocal(state.recurring, 'bridge-rec-'), ...m.recurring];
+    const priorPrivateHoldings = (state.holdings || []).filter(item => String(item.id || '').startsWith('private-investment-'));
+    const privateHoldings = privateFinance && Array.isArray(privateFinance.investments?.holdings) ? privateFinance.investments.holdings : priorPrivateHoldings;
+    const bridgeHoldings = m.sync.failedEndpoints.includes('holdings') ? (state.holdings || []).filter(item => String(item.id || '').startsWith('bridge-hold-')) : m.holdings;
+    state.holdings = [...keepLocal(state.holdings, 'bridge-hold-').filter(item => !String(item.id || '').startsWith('private-investment-')), ...bridgeHoldings, ...privateHoldings];
+    if (!m.sync.failedEndpoints.includes('liabilities')) state.liabilities = [...keepLocal(state.liabilities, 'bridge-liab-'), ...m.liabilities];
     // Profiles created before stable bridge IDs used array positions. Preserve
     // those private selections in memory while the durable profile store is
     // migrated separately, without writing financial metadata from the client.
-    const migratedProfiles = (Array.isArray(cardProfiles) ? cardProfiles : []).map(profile => {
+    const migratedProfiles = (Array.isArray(cardProfiles) ? cardProfiles : state.cardProfiles).map(profile => {
       const legacy = String(profile.accountId || '').match(/^bridge-acct-(\d{1,3})$/);
       return legacy && m.accounts[Number(legacy[1])] ? { ...profile, accountId: m.accounts[Number(legacy[1])].id } : profile;
     });
     state.cardProfiles = resolveCardProfileAccounts(state.accounts, migratedProfiles);
-    if (JSON.stringify(state.cardProfiles) !== JSON.stringify(migratedProfiles)) {
+    if (Array.isArray(cardProfiles) && JSON.stringify(state.cardProfiles) !== JSON.stringify(migratedProfiles)) {
       fetch('/api/card-profiles', { method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(state.cardProfiles) }).catch(() => {});
     }
-    state.imports = Array.isArray(importData.batches) ? importData.batches : [];
-    state.importMappings = importData.mappings && typeof importData.mappings === 'object' ? importData.mappings : {};
-    state.importRevision = Math.max(0, Number(importData.revision) || 0);
-    state.renewalsTracker = Array.isArray(renewals) ? renewals : [];
-    state.investmentHistory = Array.isArray(privateFinance.investments?.history) ? privateFinance.investments.history : [];
-    state.investmentMeta = privateFinance.investments?.meta && typeof privateFinance.investments.meta === 'object' ? privateFinance.investments.meta : {};
+    if (importData) {
+      state.imports = Array.isArray(importData.batches) ? importData.batches : [];
+      state.importMappings = importData.mappings && typeof importData.mappings === 'object' ? importData.mappings : {};
+      state.importRevision = Math.max(0, Number(importData.revision) || 0);
+    }
+    if (Array.isArray(renewals)) state.renewalsTracker = renewals;
+    if (privateFinance) {
+      state.investmentHistory = Array.isArray(privateFinance.investments?.history) ? privateFinance.investments.history : [];
+      state.investmentMeta = privateFinance.investments?.meta && typeof privateFinance.investments.meta === 'object' ? privateFinance.investments.meta : {};
+    }
     // Additional per-account balance histories, e.g. a brokerage account whose
     // monthly statements were parsed. Plaid supplies no dated history of its
     // own, so without these an account can only ever show a current value.
-    state.investmentSeries = Array.isArray(privateFinance.investments?.series) ? privateFinance.investments.series : [];
+    if (privateFinance) state.investmentSeries = Array.isArray(privateFinance.investments?.series) ? privateFinance.investments.series : [];
     state.benefits = applyDetectedPerkUsage(mergeCatalogPerks(state.accounts, state.benefits, new Date(), state.cardProfiles), state.transactions);
     state.sync = m.sync;
     state.settings.samplePreview = false;
