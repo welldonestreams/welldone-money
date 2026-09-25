@@ -38,6 +38,7 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
   'Cache-Control': 'no-store',
+  'X-Robots-Tag': 'noindex, nofollow',
 };
 
 const TYPES = {
