@@ -135,24 +135,32 @@ function tagValue(text, tag) {
 
 function normalizeOfxDate(value) {
   const match = String(value || '').match(/^(\d{4})(\d{2})(\d{2})/);
-  return match ? `${match[1]}-${match[2]}-${match[3]}` : '';
+  return match ? validIsoDate(`${match[1]}-${match[2]}-${match[3]}`) : '';
 }
 
 function normalizeDate(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
   const iso = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
+  if (iso) return validIsoDate(`${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`);
   const us = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})$/);
-  if (us) { const year = us[3].length === 2 ? `20${us[3]}` : us[3]; return `${year}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`; }
+  if (us) { const year = us[3].length === 2 ? `20${us[3]}` : us[3]; return validIsoDate(`${year}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`); }
   const date = new Date(raw);
   return Number.isNaN(date.valueOf()) ? '' : date.toISOString().slice(0, 10);
 }
 
 function parseAmount(value) {
   const normalized = String(value ?? '').trim().replace(/[$,]/g, '').replace(/^\((.*)\)$/, '-$1');
+  if (!normalized) return NaN;
   const number = Number(normalized);
   return Number.isFinite(number) ? number : NaN;
+}
+
+function validIsoDate(value) {
+  const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '';
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(date.valueOf()) || date.toISOString().slice(0, 10) !== value ? '' : value;
 }
 
 function cleanText(value) { return String(value ?? '').replace(/\s+/g, ' ').trim(); }
